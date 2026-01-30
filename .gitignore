@@ -1,0 +1,25 @@
+# Build folders
+build/
+release/
+debug/
+assimp_build/
+
+# Qt generated files
+*.pro.user
+Makefile*
+.qmake.stash
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+object_script.*
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.lib
+
+# Logs
+debug_log.txt

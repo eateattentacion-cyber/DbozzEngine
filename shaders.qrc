@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/shaders">
+        <file alias="vertex.glsl">C:/Users/User/Documents/DabozzEngine/shaders/vertex.glsl</file>
+        <file alias="fragment.glsl">C:/Users/User/Documents/DabozzEngine/shaders/fragment.glsl</file>
+    </qresource>
+</RCC>
