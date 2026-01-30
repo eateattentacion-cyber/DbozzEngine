@@ -1,7 +1,6 @@
 # Build folders
 build/
 release/
-debug/
 assimp_build/
 
 # Qt generated files
