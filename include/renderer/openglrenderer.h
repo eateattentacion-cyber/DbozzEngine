@@ -24,6 +24,8 @@ public:
     void paintGL() override;
 
     void setClearColor(float r, float g, float b, float a = 1.0f);
+    void setPlayMode(bool playing);
+    void setAnimationEnabled(bool enabled) { m_animationEnabled = enabled; }
 
 public slots:
     void setSelectedEntity(DabozzEngine::ECS::EntityID entity);
@@ -52,6 +54,8 @@ private:
     void renderColliders();
     void renderGizmo();
     void renderGrid();
+    
+    QMatrix4x4 getWorldTransform(DabozzEngine::ECS::EntityID entity) const;
 
     struct Ray {
         QVector3D origin;
@@ -106,4 +110,6 @@ private:
     QVector3D m_cameraRight;
     QVector3D m_cameraUp;
     bool m_hasCamera;
+    bool m_playMode = false;
+    bool m_animationEnabled = false;
 };

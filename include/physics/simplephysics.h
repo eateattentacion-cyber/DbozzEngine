@@ -18,6 +18,7 @@ struct RigidBodyState {
     float mass;
     float inverseMass;
     bool isStatic;
+    bool isSleeping;
     AABB bounds;
 };
 

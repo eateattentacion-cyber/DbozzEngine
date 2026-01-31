@@ -5,6 +5,7 @@
 #include <QDoubleSpinBox>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QComboBox>
 #include <QVBoxLayout>
 #include "ecs/world.h"
 
@@ -34,12 +35,14 @@ private slots:
     void onNameChanged();
     void onAddComponentClicked();
 
+public:
+    void updateUI();
+
 private:
     void setupUI();
     void createTransformSection();
     void createPropertiesSection();
     void createComponentsSection();
-    void updateUI();
     void updateComponentsList();
     
     QVBoxLayout* m_mainLayout;

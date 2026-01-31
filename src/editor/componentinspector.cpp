@@ -6,7 +6,9 @@
 #include "ecs/components/spherecollider.h"
 #include "ecs/components/mesh.h"
 #include "ecs/components/firstpersoncontroller.h"
+#include "ecs/components/animator.h"
 #include <QGroupBox>
+#include <QComboBox>
 #include <QLabel>
 #include <QMenu>
 #include <QDoubleValidator>
@@ -327,6 +329,8 @@ void ComponentInspector::updateComponentsList()
             displayName = "Mesh";
         } else if (typeId == typeid(DabozzEngine::ECS::FirstPersonController)) {
             displayName = "FirstPersonController";
+        } else if (typeId == typeid(DabozzEngine::ECS::Animator)) {
+            displayName = "Animator";
         } else {
             displayName = QString::fromStdString(typeId.name());
         }
@@ -365,6 +369,35 @@ void ComponentInspector::updateComponentsList()
             componentLayout->addWidget(new QLabel("Edit in Transform section above."));
         } else if (typeId == typeid(DabozzEngine::ECS::FirstPersonController)) {
             componentLayout->addWidget(new QLabel("First Person Controller"));
+        } else if (typeId == typeid(DabozzEngine::ECS::Animator)) {
+            DabozzEngine::ECS::Animator* animator = static_cast<DabozzEngine::ECS::Animator*>(component.get());
+            if (animator) {
+                componentLayout->addWidget(new QLabel(QString("Clips: %1").arg(animator->animations.size())));
+                componentLayout->addWidget(new QLabel(QString("Playing: %1").arg(animator->isPlaying ? "Yes" : "No")));
+                componentLayout->addWidget(new QLabel(QString("Loop: %1").arg(animator->loop ? "Yes" : "No")));
+                componentLayout->addWidget(new QLabel(QString("Speed: %1").arg(animator->playbackSpeed)));
+
+                if (!animator->animations.empty()) {
+                    QComboBox* clipCombo = new QComboBox();
+                    for (auto& [name, anim] : animator->animations) {
+                        clipCombo->addItem(name);
+                    }
+                    clipCombo->setCurrentText(animator->currentClipName);
+
+                    DabozzEngine::ECS::EntityID entity = m_selectedEntity;
+                    connect(clipCombo, &QComboBox::currentTextChanged, this, [this, entity](const QString& clipName) {
+                        if (!m_world) return;
+                        DabozzEngine::ECS::Animator* anim = m_world->getComponent<DabozzEngine::ECS::Animator>(entity);
+                        if (anim) {
+                            anim->playAnimation(clipName);
+                        }
+                    });
+
+                    QFormLayout* formLayout = new QFormLayout();
+                    formLayout->addRow("Active Clip:", clipCombo);
+                    componentLayout->addLayout(formLayout);
+                }
+            }
         } else {
             componentLayout->addWidget(new QLabel(displayName));
         }

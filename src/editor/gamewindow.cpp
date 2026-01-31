@@ -27,6 +27,7 @@ void GameWindow::setupUI()
     m_renderer = new OpenGLRenderer(this);
     DEBUG_LOG << "Renderer created" << std::endl;
     m_renderer->setWorld(m_world);
+    m_renderer->setAnimationEnabled(true);
     DEBUG_LOG << "World set on renderer" << std::endl;
     m_renderer->setMinimumSize(800, 600);
     DEBUG_LOG << "Renderer size set" << std::endl;

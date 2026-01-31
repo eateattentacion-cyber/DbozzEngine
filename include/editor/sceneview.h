@@ -3,6 +3,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QLabel>
 #include "renderer/openglrenderer.h"
 #include "ecs/world.h"
 
@@ -19,6 +20,9 @@ public:
 
 public slots:
     void setSelectedEntity(DabozzEngine::ECS::EntityID entity);
+
+public slots:
+    void setModeLabel(const QString& text);
 
 signals:
     void playClicked();
@@ -37,4 +41,5 @@ private:
     QPushButton* m_playButton;
     QPushButton* m_pauseButton;
     QPushButton* m_stopButton;
+    QLabel* m_modeLabel;
 };

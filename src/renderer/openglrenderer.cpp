@@ -4,6 +4,8 @@
 #include "ecs/components/firstpersoncontroller.h"
 #include "ecs/components/boxcollider.h"
 #include "ecs/components/spherecollider.h"
+#include "ecs/components/hierarchy.h"
+#include "ecs/components/animator.h"
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions_3_3_Core>
@@ -190,6 +192,26 @@ void OpenGLRenderer::paintGL()
                     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
                     glEnableVertexAttribArray(2);
                     
+                    // Upload bone data if mesh has animation
+                    if (mesh->hasAnimation) {
+                        glGenBuffers(1, &mesh->boneVBO);
+                        glGenBuffers(1, &mesh->weightVBO);
+                        
+                        // Bone IDs
+                        glBindBuffer(GL_ARRAY_BUFFER, mesh->boneVBO);
+                        glBufferData(GL_ARRAY_BUFFER, mesh->boneIds.size() * sizeof(int), mesh->boneIds.data(), GL_STATIC_DRAW);
+                        glVertexAttribIPointer(3, 4, GL_INT, 4 * sizeof(int), (void*)0);
+                        glEnableVertexAttribArray(3);
+                        
+                        // Bone Weights
+                        glBindBuffer(GL_ARRAY_BUFFER, mesh->weightVBO);
+                        glBufferData(GL_ARRAY_BUFFER, mesh->boneWeights.size() * sizeof(float), mesh->boneWeights.data(), GL_STATIC_DRAW);
+                        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+                        glEnableVertexAttribArray(4);
+                        
+                        DEBUG_LOG << "Uploaded bone data for animated mesh" << std::endl;
+                    }
+                    
                     glBindVertexArray(0);
                     
                     // Upload texture if available
@@ -229,7 +251,7 @@ void OpenGLRenderer::paintGL()
                         }
                         
                         if (loaded && imageData) {
-                            DEBUG_LOG << "Texture loaded: " << width << "x" << height << " channels: " << channels << std::endl;
+                            DEBUG_LOG << "Texture loaded successfully: " << width << "x" << height << " channels: " << channels << std::endl;
                             
                             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, imageData);
                             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -240,12 +262,12 @@ void OpenGLRenderer::paintGL()
                             
                             GLenum err = glGetError();
                             if (err != GL_NO_ERROR) {
-                                DEBUG_LOG << "OpenGL ERROR: " << err << std::endl;
+                                DEBUG_LOG << "OpenGL ERROR during texture upload: " << err << std::endl;
                                 mesh->hasTexture = false;
                                 glDeleteTextures(1, &mesh->textureID);
                                 mesh->textureID = 0;
                             } else {
-                                DEBUG_LOG << "SUCCESS: Texture ID " << mesh->textureID << std::endl;
+                                DEBUG_LOG << "SUCCESS: Texture uploaded to GPU (ID: " << mesh->textureID << ")" << std::endl;
                             }
                             
                             // Free STB allocated memory (but not raw embedded data)
@@ -253,9 +275,16 @@ void OpenGLRenderer::paintGL()
                                 stbi_image_free(imageData);
                             }
                         } else {
-                            DEBUG_LOG << "FAILED to load texture" << std::endl;
+                            DEBUG_LOG << "=== TEXTURE LOAD FAILED ===" << std::endl;
+                            DEBUG_LOG << "Texture path: " << mesh->texturePath << std::endl;
+                            DEBUG_LOG << "Has embedded data: " << (!mesh->embeddedTextureData.empty() ? "yes" : "no") << std::endl;
+                            if (!mesh->embeddedTextureData.empty()) {
+                                DEBUG_LOG << "Embedded data size: " << mesh->embeddedTextureData.size() << " bytes" << std::endl;
+                            }
                             if (mesh->texturePath != "embedded_raw" && mesh->texturePath != "embedded_compressed") {
                                 DEBUG_LOG << "STB Error: " << stbi_failure_reason() << std::endl;
+                            } else if (mesh->texturePath == "embedded_compressed") {
+                                DEBUG_LOG << "STB Error (compressed embedded): " << stbi_failure_reason() << std::endl;
                             }
                             mesh->hasTexture = false;
                             glDeleteTextures(1, &mesh->textureID);
@@ -270,7 +299,8 @@ void OpenGLRenderer::paintGL()
                 }
                 
                 if (mesh->isUploaded) {
-                    QMatrix4x4 modelMatrix = transform->getModelMatrix();
+                    // Calculate world transform by multiplying parent transforms
+                    QMatrix4x4 modelMatrix = getWorldTransform(entity);
                     
                     m_shaderProgram->setUniformValue("model", modelMatrix);
                     m_shaderProgram->setUniformValue("view", m_view);
@@ -279,6 +309,41 @@ void OpenGLRenderer::paintGL()
                     m_shaderProgram->setUniformValue("lightPos", QVector3D(2.0f, 2.0f, 2.0f));
                     m_shaderProgram->setUniformValue("viewPos", viewPos);
                     m_shaderProgram->setUniformValue("lightColor", QVector3D(1.0f, 1.0f, 1.0f));
+                    
+                    // Check for animator component (on this entity or parent)
+                    DabozzEngine::ECS::Animator* animator = m_world->getComponent<DabozzEngine::ECS::Animator>(entity);
+                    
+                    // If not found, check parent
+                    if (!animator) {
+                        DabozzEngine::ECS::Hierarchy* hierarchy = m_world->getComponent<DabozzEngine::ECS::Hierarchy>(entity);
+                        if (hierarchy && hierarchy->parent != 0) {
+                            animator = m_world->getComponent<DabozzEngine::ECS::Animator>(hierarchy->parent);
+                        }
+                    }
+                    
+                    if (m_animationEnabled && animator && mesh->hasAnimation) {
+                        // Upload bone matrices to shader (convert GLM to Qt)
+                        // Both GLM and QMatrix4x4 use column-major storage
+                        // GLM: glmMat[col][row], QMatrix4x4: qtMat(row, col)
+                        for (size_t i = 0; i < animator->boneMatrices.size() && i < 100; i++) {
+                            QString uniformName = QString("finalBonesMatrices[%1]").arg(i);
+                            
+                            const glm::mat4& glmMat = animator->boneMatrices[i];
+                            QMatrix4x4 qtMat;
+                            // GLM stores column-major: glmMat[col][row]
+                            // QMatrix4x4 operator(row, col) also expects column-major
+                            for (int col = 0; col < 4; col++) {
+                                for (int row = 0; row < 4; row++) {
+                                    qtMat(row, col) = glmMat[col][row];
+                                }
+                            }
+                            
+                            m_shaderProgram->setUniformValue(uniformName.toStdString().c_str(), qtMat);
+                        }
+                        m_shaderProgram->setUniformValue("hasAnimation", 1);
+                    } else {
+                        m_shaderProgram->setUniformValue("hasAnimation", 0);
+                    }
                     
                     if (mesh->hasTexture && mesh->textureID != 0) {
                         glActiveTexture(GL_TEXTURE0);
@@ -312,6 +377,17 @@ void OpenGLRenderer::paintGL()
 
     // Render transform gizmo for selected entity
     renderGizmo();
+}
+
+void OpenGLRenderer::setPlayMode(bool playing)
+{
+    m_playMode = playing;
+    if (playing) {
+        m_animationTimer->stop();
+    } else {
+        m_animationTimer->start(16);
+        update();
+    }
 }
 
 void OpenGLRenderer::setupShaders()
@@ -1000,4 +1076,30 @@ void OpenGLRenderer::renderGrid()
     glBindVertexArray(0);
     
     m_shaderProgram->release();
+}
+
+QMatrix4x4 OpenGLRenderer::getWorldTransform(DabozzEngine::ECS::EntityID entity) const
+{
+    if (!m_world) {
+        return QMatrix4x4();
+    }
+    
+    DabozzEngine::ECS::Transform* transform = m_world->getComponent<DabozzEngine::ECS::Transform>(entity);
+    if (!transform) {
+        return QMatrix4x4();
+    }
+    
+    // Get local transform
+    QMatrix4x4 localMatrix = transform->getModelMatrix();
+    
+    // Check if entity has a parent
+    DabozzEngine::ECS::Hierarchy* hierarchy = m_world->getComponent<DabozzEngine::ECS::Hierarchy>(entity);
+    if (hierarchy && hierarchy->parent != 0) {
+        // Recursively get parent's world transform and multiply
+        QMatrix4x4 parentMatrix = getWorldTransform(hierarchy->parent);
+        return parentMatrix * localMatrix;
+    }
+    
+    // No parent, return local transform
+    return localMatrix;
 }

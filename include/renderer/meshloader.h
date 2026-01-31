@@ -7,9 +7,11 @@
 namespace DabozzEngine {
 namespace Renderer {
 
+class Skeleton; // Forward declaration
+
 class MeshLoader {
 public:
-    static std::vector<ECS::Mesh> LoadMesh(const std::string& filepath);
+    static std::vector<ECS::Mesh> LoadMesh(const std::string& filepath, Skeleton* skeleton = nullptr);
 };
 
 }

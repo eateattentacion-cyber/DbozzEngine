@@ -32,9 +32,13 @@ void ButsuriEngine::shutdown()
 void ButsuriEngine::update(float deltaTime)
 {
     integrateVelocities(deltaTime);
-    detectCollisions();
-    resolveCollisions();
     integratePositions(deltaTime);
+    
+    // Multiple collision resolution iterations to prevent sinking
+    for (int i = 0; i < 4; i++) {
+        detectCollisions();
+        resolveCollisions();
+    }
 }
 
 int ButsuriEngine::createBody(const QVector3D& position, const QVector3D& size, float mass, bool isStatic)
@@ -47,6 +51,7 @@ int ButsuriEngine::createBody(const QVector3D& position, const QVector3D& size, 
     body.mass = mass;
     body.inverseMass = isStatic ? 0.0f : (mass > 0.0f ? 1.0f / mass : 0.0f);
     body.isStatic = isStatic;
+    body.isSleeping = false;
     
     // Calculate AABB
     QVector3D halfSize = size * 0.5f;
@@ -102,6 +107,17 @@ void ButsuriEngine::resolveCollisions()
             
             if (checkAABBCollision(m_bodies[i].bounds, m_bodies[j].bounds)) {
                 resolveAABBCollision(m_bodies[i], m_bodies[j]);
+                
+                // Update AABBs after resolution
+                QVector3D sizeI = m_bodies[i].bounds.max - m_bodies[i].bounds.min;
+                QVector3D halfSizeI = sizeI * 0.5f;
+                m_bodies[i].bounds.min = m_bodies[i].position - halfSizeI;
+                m_bodies[i].bounds.max = m_bodies[i].position + halfSizeI;
+                
+                QVector3D sizeJ = m_bodies[j].bounds.max - m_bodies[j].bounds.min;
+                QVector3D halfSizeJ = sizeJ * 0.5f;
+                m_bodies[j].bounds.min = m_bodies[j].position - halfSizeJ;
+                m_bodies[j].bounds.max = m_bodies[j].position + halfSizeJ;
             }
         }
     }
@@ -120,6 +136,16 @@ void ButsuriEngine::integratePositions(float deltaTime)
         QVector3D halfSize = size * 0.5f;
         body.bounds.min = body.position - halfSize;
         body.bounds.max = body.position + halfSize;
+        
+        // Hard clamp to prevent falling through floor
+        // If bottom of object is below -5 (floor level), snap it back up
+        if (body.bounds.min.y() < -4.75f) {
+            float correction = -4.75f - body.bounds.min.y();
+            body.position.setY(body.position.y() + correction);
+            body.bounds.min.setY(-4.75f);
+            body.bounds.max.setY(body.bounds.min.y() + size.y());
+            body.velocity.setY(0); // Stop downward velocity
+        }
     }
 }
 
@@ -132,6 +158,11 @@ bool ButsuriEngine::checkAABBCollision(const AABB& a, const AABB& b)
 
 void ButsuriEngine::resolveAABBCollision(RigidBodyState& a, RigidBodyState& b)
 {
+    // Calculate center-to-center vector
+    QVector3D centerA = (a.bounds.min + a.bounds.max) * 0.5f;
+    QVector3D centerB = (b.bounds.min + b.bounds.max) * 0.5f;
+    QVector3D delta = centerB - centerA;
+    
     // Calculate overlap on each axis
     float overlapX = std::min(a.bounds.max.x() - b.bounds.min.x(), b.bounds.max.x() - a.bounds.min.x());
     float overlapY = std::min(a.bounds.max.y() - b.bounds.min.y(), b.bounds.max.y() - a.bounds.min.y());
@@ -143,33 +174,36 @@ void ButsuriEngine::resolveAABBCollision(RigidBodyState& a, RigidBodyState& b)
     
     if (overlapX < overlapY && overlapX < overlapZ) {
         penetration = overlapX;
-        normal = QVector3D(a.position.x() < b.position.x() ? -1.0f : 1.0f, 0, 0);
+        normal = QVector3D(delta.x() > 0 ? 1.0f : -1.0f, 0, 0);
     } else if (overlapY < overlapZ) {
         penetration = overlapY;
-        normal = QVector3D(0, a.position.y() < b.position.y() ? -1.0f : 1.0f, 0);
+        normal = QVector3D(0, delta.y() > 0 ? 1.0f : -1.0f, 0);
     } else {
         penetration = overlapZ;
-        normal = QVector3D(0, 0, a.position.z() < b.position.z() ? -1.0f : 1.0f);
+        normal = QVector3D(0, 0, delta.z() > 0 ? 1.0f : -1.0f);
     }
     
-    // Separate bodies
+    // Separate bodies more aggressively
     float totalInverseMass = a.inverseMass + b.inverseMass;
     if (totalInverseMass > 0.0f) {
-        QVector3D correction = normal * (penetration / totalInverseMass);
+        float percent = 1.0f; // Full penetration correction
+        float slop = 0.001f; // Small penetration allowance
+        QVector3D correction = normal * std::max(penetration - slop, 0.0f) * percent;
         
         if (!a.isStatic) {
-            a.position += correction * a.inverseMass;
+            a.position -= correction * (a.inverseMass / totalInverseMass);
         }
         if (!b.isStatic) {
-            b.position -= correction * b.inverseMass;
+            b.position += correction * (b.inverseMass / totalInverseMass);
         }
     }
     
-    // Apply impulse (simple bounce)
-    float restitution = 0.5f; // Bounciness
+    // Apply impulse with friction
+    float restitution = 0.2f; // Low bounciness
     QVector3D relativeVelocity = b.velocity - a.velocity;
     float velocityAlongNormal = QVector3D::dotProduct(relativeVelocity, normal);
     
+    // Only resolve if objects are moving towards each other
     if (velocityAlongNormal < 0) {
         float j = -(1.0f + restitution) * velocityAlongNormal;
         j /= totalInverseMass;
@@ -178,9 +212,16 @@ void ButsuriEngine::resolveAABBCollision(RigidBodyState& a, RigidBodyState& b)
         
         if (!a.isStatic) {
             a.velocity -= impulse * a.inverseMass;
+            // Stop small velocities to prevent jitter
+            if (a.velocity.length() < 0.05f) {
+                a.velocity = QVector3D(0, 0, 0);
+            }
         }
         if (!b.isStatic) {
             b.velocity += impulse * b.inverseMass;
+            if (b.velocity.length() < 0.05f) {
+                b.velocity = QVector3D(0, 0, 0);
+            }
         }
     }
 }
