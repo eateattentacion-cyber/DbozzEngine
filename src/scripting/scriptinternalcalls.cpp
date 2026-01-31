@@ -56,7 +56,7 @@ void ScriptInternalCalls::Entity_Destroy(uint32_t entityID)
 bool ScriptInternalCalls::Entity_IsValid(uint32_t entityID)
 {
     if (!s_world) return false;
-    return s_world->isEntityValid(entityID);
+    return s_world->hasEntity(entityID);
 }
 
 // Transform API Implementation
