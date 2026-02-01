@@ -111,6 +111,7 @@ private:
     };
     std::map<DabozzEngine::ECS::EntityID, SavedEntityState> m_savedState;
 
+    void applyDarkTheme();
     void saveSceneState();
     void restoreSceneState();
 };

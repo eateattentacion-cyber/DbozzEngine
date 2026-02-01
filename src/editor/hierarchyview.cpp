@@ -32,6 +32,9 @@ void HierarchyView::setupUI()
     m_treeWidget = new QTreeWidget();
     m_treeWidget->setHeaderLabel("Scene Objects");
     m_treeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_treeWidget->setIndentation(16);
+    m_treeWidget->setAnimated(true);
+    m_treeWidget->setAlternatingRowColors(true);
     
     m_layout->addWidget(m_treeWidget);
     setLayout(m_layout);

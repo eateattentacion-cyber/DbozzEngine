@@ -36,14 +36,19 @@ void ComponentInspector::setupUI()
     m_mainLayout = new QVBoxLayout(this);
     
     QLabel* titleLabel = new QLabel("Inspector");
-    titleLabel->setStyleSheet("font-weight: bold; font-size: 16px; margin-bottom: 10px;");
+    titleLabel->setStyleSheet("font-weight: bold; font-size: 14px; color: #a0c4ff; margin-bottom: 8px; padding: 4px 0;");
     m_mainLayout->addWidget(titleLabel);
     
     createTransformSection();
     createPropertiesSection();
     createComponentsSection();
     
-    m_addComponentButton = new QPushButton("Add Component");
+    m_addComponentButton = new QPushButton("+ Add Component");
+    m_addComponentButton->setStyleSheet(
+        "QPushButton { background-color: #2563eb; color: white; border: none; border-radius: 4px; padding: 8px 16px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #1d4ed8; }"
+        "QPushButton:disabled { background-color: #333; color: #666; }"
+    );
     connect(m_addComponentButton, &QPushButton::clicked, this, &ComponentInspector::onAddComponentClicked);
     m_mainLayout->addWidget(m_addComponentButton);
     m_mainLayout->addStretch();
