@@ -19,6 +19,8 @@
 #include "physics/simplephysics.h"
 #include "physics/physicssystem.h"
 #include "ecs/components/rigidbody.h"
+#include "editor/undostack.h"
+#include "editor/scenefile.h"
 #include "debug/logger.h"
 #include <QFileDialog>
 #include <QMessageBox>
@@ -29,10 +31,12 @@ MainWindow::MainWindow(QWidget* parent)
     , m_world(new DabozzEngine::ECS::World())
     , m_gameWindow(nullptr)
     , m_scriptEditor(nullptr)
+    , m_centralTabs(nullptr)
     , m_butsuri(nullptr)
     , m_physicsSystem(nullptr)
     , m_animationSystem(nullptr)
     , m_gameLoopTimer(new QTimer(this))
+    , m_undoStack(new QUndoStack(this))
     , m_editorMode(EditorMode::Edit)
 {
     setWindowTitle("Dabozz Editor");
@@ -58,9 +62,6 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
-    if (m_scriptEditor) {
-        delete m_scriptEditor;
-    }
     if (m_gameWindow) {
         delete m_gameWindow;
     }
@@ -117,6 +118,24 @@ void MainWindow::createMenus()
 
     m_fileMenu->addSeparator();
 
+    QAction* undoAction = m_undoStack->createUndoAction(this, "&Undo");
+    undoAction->setShortcut(QKeySequence::Undo);
+    m_editMenu->addAction(undoAction);
+
+    QAction* redoAction = m_undoStack->createRedoAction(this, "&Redo");
+    redoAction->setShortcut(QKeySequence::Redo);
+    m_editMenu->addAction(redoAction);
+
+    m_editMenu->addSeparator();
+
+    QAction* deleteAction = m_editMenu->addAction("&Delete");
+    deleteAction->setShortcut(QKeySequence::Delete);
+    connect(deleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
+
+    QAction* duplicateAction = m_editMenu->addAction("D&uplicate");
+    duplicateAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    connect(duplicateAction, &QAction::triggered, this, &MainWindow::onDuplicateSelected);
+
     QAction* openAnimatorAction = m_viewMenu->addAction("&Animator Window");
     connect(openAnimatorAction, &QAction::triggered, this, [this]() {
         m_animatorGraphEditor->show();
@@ -133,35 +152,57 @@ void MainWindow::createMenus()
 
 void MainWindow::createToolBars()
 {
-    m_mainToolBar = addToolBar("Main");
-    m_editToolBar = addToolBar("Edit");
-    
-    m_mainToolBar->addAction(QIcon(), "New");
-    m_mainToolBar->addAction(QIcon(), "Open");
-    m_mainToolBar->addAction(QIcon(), "Save");
-    m_mainToolBar->addSeparator();
-    m_mainToolBar->addAction(QIcon(), "Play");
-    m_mainToolBar->addAction(QIcon(), "Pause");
-    m_mainToolBar->addAction(QIcon(), "Stop");
+	m_mainToolBar = addToolBar("Main");
+	m_editToolBar = addToolBar("Edit");
+
+	QAction *new_action = m_mainToolBar->addAction(QIcon("editor/icons/File.svg"), "New");
+	connect(new_action, &QAction::triggered, this, &MainWindow::newScene);
+
+	QAction *open_action = m_mainToolBar->addAction(QIcon("editor/icons/Load.svg"), "Open");
+	connect(open_action, &QAction::triggered, this, &MainWindow::openScene);
+
+	QAction *save_action = m_mainToolBar->addAction(QIcon("editor/icons/Save.svg"), "Save");
+	connect(save_action, &QAction::triggered, this, &MainWindow::saveScene);
+
+	m_mainToolBar->addSeparator();
+
+	QAction *play_action = m_mainToolBar->addAction(QIcon("editor/icons/Play.svg"), "Play");
+	connect(play_action, &QAction::triggered, this, &MainWindow::onPlayClicked);
+
+	QAction *pause_action = m_mainToolBar->addAction(QIcon("editor/icons/Pause.svg"), "Pause");
+	connect(pause_action, &QAction::triggered, this, &MainWindow::onPauseClicked);
+
+	QAction *stop_action = m_mainToolBar->addAction(QIcon("editor/icons/Stop.svg"), "Stop");
+	connect(stop_action, &QAction::triggered, this, &MainWindow::onStopClicked);
 }
 
 void MainWindow::createDockWidgets()
 {
     m_hierarchyView = new HierarchyView(this);
     m_hierarchyView->setWorld(m_world);
+    m_hierarchyView->setUndoStack(m_undoStack);
     QDockWidget* hierarchyDock = new QDockWidget("Hierarchy", this);
     hierarchyDock->setWidget(m_hierarchyView);
     addDockWidget(Qt::LeftDockWidgetArea, hierarchyDock);
-    
+
     m_componentInspector = new ComponentInspector(this);
     m_componentInspector->setWorld(m_world);
+    m_componentInspector->setUndoStack(m_undoStack);
     QDockWidget* inspectorDock = new QDockWidget("Inspector", this);
     inspectorDock->setWidget(m_componentInspector);
     addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
     
+    // Create tab widget for central area
+    m_centralTabs = new QTabWidget(this);
+    
     m_sceneView = new SceneView(this);
     m_sceneView->setWorld(m_world);
-    setCentralWidget(m_sceneView);
+    m_centralTabs->addTab(m_sceneView, "Scene");
+    
+    m_scriptEditor = new ScriptEditor(this);
+    m_centralTabs->addTab(m_scriptEditor, "Script Editor");
+    
+    setCentralWidget(m_centralTabs);
 
     m_animatorGraphEditor = new AnimatorGraphEditor(nullptr);
     m_animatorGraphEditor->setWorld(m_world);
@@ -234,27 +275,95 @@ void MainWindow::setupLayout()
 
 void MainWindow::newScene()
 {
-    QMessageBox::information(this, "New Scene", "Creating new scene...");
+    if (m_sceneDirty) {
+        auto result = QMessageBox::question(this, "Unsaved Changes",
+            "You have unsaved changes. Do you want to save before creating a new scene?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+        if (result == QMessageBox::Cancel) return;
+        if (result == QMessageBox::Save) saveScene();
+    }
+
+    auto entities = m_world->getEntities();
+    for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
+        m_world->destroyEntity(*it);
+    }
+
+    m_undoStack->clear();
+    m_currentScenePath.clear();
+    m_sceneDirty = false;
+    m_selectedEntity = DabozzEngine::ECS::INVALID_ENTITY;
+
+    m_hierarchyView->refreshHierarchy();
+    m_componentInspector->clearSelection();
+    m_sceneView->renderer()->update();
+
+    setWindowTitle("Dabozz Editor - New Scene");
+    statusBar()->showMessage("New scene created");
 }
 
 void MainWindow::openScene()
 {
-    QString fileName = QFileDialog::getOpenFileName(this, "Open Scene", "", "Scene Files (*.scene)");
-    if (!fileName.isEmpty()) {
+    if (m_sceneDirty) {
+        auto result = QMessageBox::question(this, "Unsaved Changes",
+            "You have unsaved changes. Do you want to save first?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+        if (result == QMessageBox::Cancel) return;
+        if (result == QMessageBox::Save) saveScene();
+    }
+
+    QString fileName = QFileDialog::getOpenFileName(this, "Open Scene", "", "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
+    if (fileName.isEmpty()) return;
+
+    if (SceneFile::loadScene(m_world, fileName)) {
+        m_currentScenePath = fileName;
+        m_sceneDirty = false;
+        m_undoStack->clear();
+        m_selectedEntity = DabozzEngine::ECS::INVALID_ENTITY;
+
+        m_hierarchyView->refreshHierarchy();
+        m_componentInspector->clearSelection();
+        m_sceneView->renderer()->update();
+
+        QFileInfo fi(fileName);
+        setWindowTitle(QString("Dabozz Editor - %1").arg(fi.fileName()));
         statusBar()->showMessage(QString("Opened scene: %1").arg(fileName));
+    } else {
+        QMessageBox::critical(this, "Open Failed", "Failed to load scene file.");
     }
 }
 
 void MainWindow::saveScene()
 {
-    statusBar()->showMessage("Scene saved");
+    if (m_currentScenePath.isEmpty()) {
+        saveSceneAs();
+        return;
+    }
+
+    if (SceneFile::saveScene(m_world, m_currentScenePath)) {
+        m_sceneDirty = false;
+        statusBar()->showMessage(QString("Scene saved: %1").arg(m_currentScenePath));
+    } else {
+        QMessageBox::critical(this, "Save Failed", "Failed to save scene file.");
+    }
 }
 
 void MainWindow::saveSceneAs()
 {
-    QString fileName = QFileDialog::getSaveFileName(this, "Save Scene As", "", "Scene Files (*.scene)");
-    if (!fileName.isEmpty()) {
+    QString fileName = QFileDialog::getSaveFileName(this, "Save Scene As", "", "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
+    if (fileName.isEmpty()) return;
+
+    if (!fileName.endsWith(".dabozz")) {
+        fileName += ".dabozz";
+    }
+
+    if (SceneFile::saveScene(m_world, fileName)) {
+        m_currentScenePath = fileName;
+        m_sceneDirty = false;
+        QFileInfo fi(fileName);
+        setWindowTitle(QString("Dabozz Editor - %1").arg(fi.fileName()));
         statusBar()->showMessage(QString("Saved scene as: %1").arg(fileName));
+    } else {
+        QMessageBox::critical(this, "Save Failed", "Failed to save scene file.");
     }
 }
 
@@ -612,10 +721,32 @@ void MainWindow::restoreSceneState()
 
 void MainWindow::openScriptEditor()
 {
-    if (!m_scriptEditor) {
-        m_scriptEditor = new ScriptEditor();
+    if (m_centralTabs) {
+        for (int i = 0; i < m_centralTabs->count(); ++i) {
+            if (m_centralTabs->tabText(i) == "Script Editor") {
+                m_centralTabs->setCurrentIndex(i);
+                break;
+            }
+        }
     }
-    m_scriptEditor->show();
-    m_scriptEditor->raise();
-    m_scriptEditor->activateWindow();
+}
+
+void MainWindow::onDeleteSelected()
+{
+    if (m_selectedEntity == DabozzEngine::ECS::INVALID_ENTITY) return;
+
+    m_undoStack->push(new DeleteEntityCommand(m_world, m_selectedEntity, [this]() {
+        m_hierarchyView->refreshHierarchy();
+        m_componentInspector->clearSelection();
+    }));
+
+    m_selectedEntity = DabozzEngine::ECS::INVALID_ENTITY;
+    m_sceneDirty = true;
+}
+
+void MainWindow::onDuplicateSelected()
+{
+    if (m_selectedEntity == DabozzEngine::ECS::INVALID_ENTITY || !m_world) return;
+    m_hierarchyView->duplicateSelectedEntity();
+    m_sceneDirty = true;
 }

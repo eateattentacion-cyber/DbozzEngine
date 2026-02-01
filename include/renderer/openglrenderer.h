@@ -45,15 +45,21 @@ private slots:
     void updateAnimation();
 
 private:
-    enum class GizmoAxis { None, X, Y, Z };
+    enum class GizmoMode { Translate, Rotate, Scale };
+    enum class GizmoAxis { None, X, Y, Z, XY, YZ, XZ, Center };
 
     void setupShaders();
     void setupGeometry();
     void setupMatrices();
     void setupGrid();
+    void setupSkybox();
     void renderColliders();
     void renderGizmo();
     void renderGrid();
+    void renderSkybox();
+    void renderTranslateGizmo(const QVector3D& position, float scale);
+    void renderRotateGizmo(const QVector3D& position, float scale);
+    void renderScaleGizmo(const QVector3D& position, float scale);
     
     QMatrix4x4 getWorldTransform(DabozzEngine::ECS::EntityID entity) const;
 
@@ -80,13 +86,21 @@ private:
     static constexpr float kGizmoAxisLength = 1.0f;
     static constexpr float kGizmoAxisThickness = 0.05f;
     static constexpr float kGizmoPickThickness = 0.2f;
+    static constexpr float kGizmoArrowSize = 0.15f;
+    static constexpr float kGizmoPlaneSize = 0.25f;
 
     QOpenGLShaderProgram* m_shaderProgram;
+    QOpenGLShaderProgram* m_skyboxShader;
     GLuint m_vao;
     GLuint m_vbo;
     GLuint m_ebo;
     GLuint m_gridVAO;
     GLuint m_gridVBO;
+    GLuint m_arrowVAO;
+    GLuint m_arrowVBO;
+    GLuint m_arrowEBO;
+    GLuint m_skyboxVAO;
+    GLuint m_skyboxVBO;
     
     QMatrix4x4 m_projection;
     QMatrix4x4 m_view;
@@ -104,6 +118,8 @@ private:
     GizmoAxis m_hoverAxis;
     float m_dragStartAxisValue;
     QVector3D m_dragStartPosition;
+    QVector3D m_dragStartScale;
+    QQuaternion m_dragStartRotation;
     QVector3D m_dragPlaneNormal;
     QVector3D m_cameraPosition;
     QVector3D m_cameraForward;
@@ -112,4 +128,5 @@ private:
     bool m_hasCamera;
     bool m_playMode = false;
     bool m_animationEnabled = false;
+    GizmoMode m_gizmoMode = GizmoMode::Translate;
 };

@@ -187,7 +187,7 @@ void ButsuriEngine::resolveAABBCollision(RigidBodyState& a, RigidBodyState& b)
     float totalInverseMass = a.inverseMass + b.inverseMass;
     if (totalInverseMass > 0.0f) {
         float percent = 1.0f; // Full penetration correction
-        float slop = 0.001f; // Small penetration allowance
+        float slop = 0.001f;
         QVector3D correction = normal * std::max(penetration - slop, 0.0f) * percent;
         
         if (!a.isStatic) {

@@ -7,6 +7,7 @@
 #include "ecs/components/mesh.h"
 #include "ecs/components/firstpersoncontroller.h"
 #include "ecs/components/animator.h"
+#include "ecs/components/hierarchy.h"
 #include <QGroupBox>
 #include <QComboBox>
 #include <QLabel>
@@ -14,6 +15,8 @@
 #include <QDoubleValidator>
 #include <QSignalBlocker>
 #include <typeinfo>
+#include <QHBoxLayout>
+#include "editor/undostack.h"
 
 ComponentInspector::ComponentInspector(QWidget* parent)
     : QWidget(parent)
@@ -56,10 +59,10 @@ void ComponentInspector::createTransformSection()
 
     auto createFloatField = [this](const QString& value) {
         QLineEdit* field = new QLineEdit(value);
-        auto* validator = new QDoubleValidator(field);
-        validator->setDecimals(4);
+        auto* validator = new QDoubleValidator(-99999.0, 99999.0, 4, field);
         validator->setNotation(QDoubleValidator::StandardNotation);
         field->setValidator(validator);
+        field->setStyleSheet("QLineEdit[hasAcceptableInput=false] { border: 1px solid red; }");
         connect(field, &QLineEdit::editingFinished, this, &ComponentInspector::onTransformChanged);
         return field;
     };
@@ -122,9 +125,26 @@ void ComponentInspector::setWorld(DabozzEngine::ECS::World* world)
     m_world = world;
 }
 
+void ComponentInspector::setUndoStack(QUndoStack* undoStack)
+{
+    m_undoStack = undoStack;
+}
+
 void ComponentInspector::setSelectedEntity(DabozzEngine::ECS::EntityID entity)
 {
     m_selectedEntity = entity;
+
+    if (m_world && entity != 0) {
+        auto* t = m_world->getComponent<DabozzEngine::ECS::Transform>(entity);
+        if (t) {
+            m_prevPosition = t->position;
+            m_prevRotation = t->rotation;
+            m_prevScale = t->scale;
+        }
+        auto* n = m_world->getComponent<DabozzEngine::ECS::Name>(entity);
+        if (n) m_prevName = n->name;
+    }
+
     updateUI();
 }
 
@@ -144,9 +164,14 @@ void ComponentInspector::refreshSelectedEntity(DabozzEngine::ECS::EntityID entit
 void ComponentInspector::onTransformChanged()
 {
     if (!m_world || m_selectedEntity == 0) return;
-    
+
     DabozzEngine::ECS::Transform* transform = m_world->getComponent<DabozzEngine::ECS::Transform>(m_selectedEntity);
     if (!transform) return;
+
+    if (!m_positionX->hasAcceptableInput() || !m_positionY->hasAcceptableInput() || !m_positionZ->hasAcceptableInput() ||
+        !m_rotationX->hasAcceptableInput() || !m_rotationY->hasAcceptableInput() || !m_rotationZ->hasAcceptableInput() ||
+        !m_scaleX->hasAcceptableInput() || !m_scaleY->hasAcceptableInput() || !m_scaleZ->hasAcceptableInput())
+        return;
 
     const float positionX = m_positionX->text().toFloat();
     const float positionY = m_positionY->text().toFloat();
@@ -158,9 +183,26 @@ void ComponentInspector::onTransformChanged()
     const float scaleY = m_scaleY->text().toFloat();
     const float scaleZ = m_scaleZ->text().toFloat();
 
-    transform->position = QVector3D(positionX, positionY, positionZ);
-    transform->rotation = QQuaternion::fromEulerAngles(rotationX, rotationY, rotationZ);
-    transform->scale = QVector3D(scaleX, scaleY, scaleZ);
+    QVector3D newPos(positionX, positionY, positionZ);
+    QQuaternion newRot = QQuaternion::fromEulerAngles(rotationX, rotationY, rotationZ);
+    QVector3D newScale(scaleX, scaleY, scaleZ);
+
+    if (m_undoStack) {
+        auto refreshCb = [this]() { updateUI(); };
+        m_undoStack->push(new TransformChangeCommand(
+            m_world, m_selectedEntity,
+            m_prevPosition, m_prevRotation, m_prevScale,
+            newPos, newRot, newScale,
+            refreshCb));
+    } else {
+        transform->position = newPos;
+        transform->rotation = newRot;
+        transform->scale = newScale;
+    }
+
+    m_prevPosition = newPos;
+    m_prevRotation = newRot;
+    m_prevScale = newScale;
 }
 
 void ComponentInspector::onNameChanged()
@@ -168,12 +210,23 @@ void ComponentInspector::onNameChanged()
     if (!m_world || m_selectedEntity == 0) return;
 
     const QString nameText = m_nameEdit->text();
-    DabozzEngine::ECS::Name* nameComponent = m_world->getComponent<DabozzEngine::ECS::Name>(m_selectedEntity);
-    if (nameComponent) {
-        nameComponent->name = nameText;
+
+    if (m_undoStack) {
+        auto refreshCb = [this]() { updateUI(); };
+        m_undoStack->push(new NameChangeCommand(
+            m_world, m_selectedEntity,
+            m_prevName, nameText,
+            refreshCb));
     } else {
-        m_world->addComponent<DabozzEngine::ECS::Name>(m_selectedEntity, nameText);
+        DabozzEngine::ECS::Name* nameComponent = m_world->getComponent<DabozzEngine::ECS::Name>(m_selectedEntity);
+        if (nameComponent) {
+            nameComponent->name = nameText;
+        } else {
+            m_world->addComponent<DabozzEngine::ECS::Name>(m_selectedEntity, nameText);
+        }
     }
+
+    m_prevName = nameText;
 }
 
 void ComponentInspector::onAddComponentClicked()
@@ -337,6 +390,41 @@ void ComponentInspector::updateComponentsList()
 
         QGroupBox* componentGroup = new QGroupBox(displayName);
         QVBoxLayout* componentLayout = new QVBoxLayout(componentGroup);
+
+        bool isCoreComponent = (typeId == typeid(DabozzEngine::ECS::Transform) ||
+                                typeId == typeid(DabozzEngine::ECS::Name) ||
+                                typeId == typeid(DabozzEngine::ECS::Hierarchy));
+
+        if (!isCoreComponent) {
+            QPushButton* removeBtn = new QPushButton("X");
+            removeBtn->setFixedSize(20, 20);
+            removeBtn->setStyleSheet("QPushButton { color: red; font-weight: bold; border: none; }");
+            removeBtn->setToolTip("Remove " + displayName);
+
+            std::type_index capturedType = typeId;
+            DabozzEngine::ECS::EntityID entity = m_selectedEntity;
+            connect(removeBtn, &QPushButton::clicked, this, [this, capturedType, entity]() {
+                if (!m_world || entity == 0) return;
+                if (capturedType == typeid(DabozzEngine::ECS::RigidBody))
+                    m_world->removeComponent<DabozzEngine::ECS::RigidBody>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::BoxCollider))
+                    m_world->removeComponent<DabozzEngine::ECS::BoxCollider>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::SphereCollider))
+                    m_world->removeComponent<DabozzEngine::ECS::SphereCollider>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::Mesh))
+                    m_world->removeComponent<DabozzEngine::ECS::Mesh>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::FirstPersonController))
+                    m_world->removeComponent<DabozzEngine::ECS::FirstPersonController>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::Animator))
+                    m_world->removeComponent<DabozzEngine::ECS::Animator>(entity);
+                updateUI();
+            });
+
+            QHBoxLayout* headerLayout = new QHBoxLayout();
+            headerLayout->addStretch();
+            headerLayout->addWidget(removeBtn);
+            componentLayout->addLayout(headerLayout);
+        }
 
         if (typeId == typeid(DabozzEngine::ECS::RigidBody)) {
             DabozzEngine::ECS::RigidBody* rigidBody = static_cast<DabozzEngine::ECS::RigidBody*>(component.get());

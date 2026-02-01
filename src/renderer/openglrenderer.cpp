@@ -24,11 +24,17 @@
 OpenGLRenderer::OpenGLRenderer(QWidget* parent)
     : QOpenGLWidget(parent)
     , m_shaderProgram(nullptr)
+    , m_skyboxShader(nullptr)
     , m_vao(0)
     , m_vbo(0)
     , m_ebo(0)
     , m_gridVAO(0)
     , m_gridVBO(0)
+    , m_arrowVAO(0)
+    , m_arrowVBO(0)
+    , m_arrowEBO(0)
+    , m_skyboxVAO(0)
+    , m_skyboxVBO(0)
     , m_rotationAngle(0.0f)
     , m_world(nullptr)
     , m_selectedEntity(DabozzEngine::ECS::INVALID_ENTITY)
@@ -38,6 +44,8 @@ OpenGLRenderer::OpenGLRenderer(QWidget* parent)
     , m_hoverAxis(GizmoAxis::None)
     , m_dragStartAxisValue(0.0f)
     , m_dragStartPosition(0.0f, 0.0f, 0.0f)
+    , m_dragStartScale(1.0f, 1.0f, 1.0f)
+    , m_dragStartRotation()
     , m_dragPlaneNormal(0.0f, 0.0f, 1.0f)
     , m_cameraPosition(0.0f, 0.0f, 3.0f)
     , m_cameraForward(0.0f, 0.0f, -1.0f)
@@ -60,11 +68,17 @@ OpenGLRenderer::~OpenGLRenderer()
 {
     makeCurrent();
     delete m_shaderProgram;
+    delete m_skyboxShader;
     glDeleteVertexArrays(1, &m_vao);
     glDeleteBuffers(1, &m_vbo);
     glDeleteBuffers(1, &m_ebo);
     glDeleteVertexArrays(1, &m_gridVAO);
     glDeleteBuffers(1, &m_gridVBO);
+    glDeleteVertexArrays(1, &m_arrowVAO);
+    glDeleteBuffers(1, &m_arrowVBO);
+    glDeleteBuffers(1, &m_arrowEBO);
+    glDeleteVertexArrays(1, &m_skyboxVAO);
+    glDeleteBuffers(1, &m_skyboxVBO);
     doneCurrent();
 }
 
@@ -102,6 +116,8 @@ void OpenGLRenderer::initializeGL()
     setupMatrices();
     DEBUG_LOG << "Setting up grid..." << std::endl;
     setupGrid();
+    DEBUG_LOG << "Setting up skybox..." << std::endl;
+    setupSkybox();
     DEBUG_LOG << "OpenGLRenderer::initializeGL complete" << std::endl;
 }
 
@@ -309,6 +325,9 @@ void OpenGLRenderer::paintGL()
                     m_shaderProgram->setUniformValue("lightPos", QVector3D(2.0f, 2.0f, 2.0f));
                     m_shaderProgram->setUniformValue("viewPos", viewPos);
                     m_shaderProgram->setUniformValue("lightColor", QVector3D(1.0f, 1.0f, 1.0f));
+                    m_shaderProgram->setUniformValue("roughness", 0.5f);
+                    m_shaderProgram->setUniformValue("metallic", 0.0f);
+                    m_shaderProgram->setUniformValue("specular", 0.5f);
                     
                     // Check for animator component (on this entity or parent)
                     DabozzEngine::ECS::Animator* animator = m_world->getComponent<DabozzEngine::ECS::Animator>(entity);
@@ -368,6 +387,9 @@ void OpenGLRenderer::paintGL()
     }
     
     m_shaderProgram->release();
+    
+    // Render skybox first
+    renderSkybox();
     
     // Render collider debug wireframes (green)
     renderColliders();
@@ -501,6 +523,64 @@ void OpenGLRenderer::setupGeometry()
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+    
+    // Create cone geometry for arrow tips
+    std::vector<float> coneVertices;
+    std::vector<unsigned int> coneIndices;
+    const int segments = 16;
+    const float radius = 0.5f;
+    const float height = 1.0f;
+    
+    // Tip vertex
+    coneVertices.insert(coneVertices.end(), {0.0f, height, 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 1.0f});
+    
+    // Base vertices
+    for (int i = 0; i <= segments; ++i) {
+        float angle = (float)i / segments * 2.0f * M_PI;
+        float x = cos(angle) * radius;
+        float z = sin(angle) * radius;
+        coneVertices.insert(coneVertices.end(), {x, 0.0f, z, 0.0f, -1.0f, 0.0f, (float)i / segments, 0.0f});
+    }
+    
+    // Side triangles
+    for (int i = 0; i < segments; ++i) {
+        coneIndices.push_back(0);
+        coneIndices.push_back(i + 1);
+        coneIndices.push_back(i + 2);
+    }
+    
+    // Base center
+    int baseCenter = coneVertices.size() / 8;
+    coneVertices.insert(coneVertices.end(), {0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.5f, 0.5f});
+    
+    // Base triangles
+    for (int i = 0; i < segments; ++i) {
+        coneIndices.push_back(baseCenter);
+        coneIndices.push_back(i + 2);
+        coneIndices.push_back(i + 1);
+    }
+    
+    glGenVertexArrays(1, &m_arrowVAO);
+    glGenBuffers(1, &m_arrowVBO);
+    glGenBuffers(1, &m_arrowEBO);
+    
+    glBindVertexArray(m_arrowVAO);
+    
+    glBindBuffer(GL_ARRAY_BUFFER, m_arrowVBO);
+    glBufferData(GL_ARRAY_BUFFER, coneVertices.size() * sizeof(float), coneVertices.data(), GL_STATIC_DRAW);
+    
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_arrowEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, coneIndices.size() * sizeof(unsigned int), coneIndices.data(), GL_STATIC_DRAW);
+    
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
 }
 
 void OpenGLRenderer::setupMatrices()
@@ -559,6 +639,30 @@ void OpenGLRenderer::keyPressEvent(QKeyEvent* event)
             }
         }
     }
+    
+    // Gizmo mode switching (W = translate, E = rotate, R = scale)
+    if (!m_playMode) {
+        switch (event->key()) {
+            case Qt::Key_W:
+                if (!event->isAutoRepeat()) {
+                    m_gizmoMode = GizmoMode::Translate;
+                    update();
+                }
+                break;
+            case Qt::Key_E:
+                if (!event->isAutoRepeat()) {
+                    m_gizmoMode = GizmoMode::Rotate;
+                    update();
+                }
+                break;
+            case Qt::Key_R:
+                if (!event->isAutoRepeat()) {
+                    m_gizmoMode = GizmoMode::Scale;
+                    update();
+                }
+                break;
+        }
+    }
 }
 
 void OpenGLRenderer::keyReleaseEvent(QKeyEvent* event)
@@ -613,6 +717,8 @@ void OpenGLRenderer::mousePressEvent(QMouseEvent* event)
             m_hoverAxis = axis;
             m_draggingGizmo = true;
             m_dragStartPosition = transform->position;
+            m_dragStartScale = transform->scale;
+            m_dragStartRotation = transform->rotation;
             m_dragPlaneNormal = computeDragPlaneNormal(axisDirection(axis));
             if (!computeAxisValue(event->position(), transform->position, axisDirection(axis), m_dragPlaneNormal, m_dragStartAxisValue)) {
                 m_draggingGizmo = false;
@@ -653,7 +759,36 @@ void OpenGLRenderer::mouseMoveEvent(QMouseEvent* event)
         float axisValue = 0.0f;
         if (computeAxisValue(event->position(), m_dragStartPosition, axisDirection(m_activeAxis), m_dragPlaneNormal, axisValue)) {
             const float delta = axisValue - m_dragStartAxisValue;
-            transform->position = m_dragStartPosition + axisDirection(m_activeAxis) * delta;
+            
+            switch (m_gizmoMode) {
+                case GizmoMode::Translate:
+                    transform->position = m_dragStartPosition + axisDirection(m_activeAxis) * delta;
+                    break;
+                    
+                case GizmoMode::Scale: {
+                    // Scale based on drag distance
+                    const float scaleFactor = 1.0f + delta * 0.5f;
+                    QVector3D scaleChange = axisDirection(m_activeAxis) * (scaleFactor - 1.0f);
+                    if (m_activeAxis == GizmoAxis::Center) {
+                        // Uniform scale
+                        transform->scale = m_dragStartScale * scaleFactor;
+                    } else {
+                        // Per-axis scale
+                        transform->scale = m_dragStartScale + scaleChange;
+                    }
+                    break;
+                }
+                    
+                case GizmoMode::Rotate: {
+                    // Rotate around axis
+                    const float rotationDegrees = delta * 50.0f;
+                    QVector3D axis = axisDirection(m_activeAxis);
+                    QQuaternion rotation = QQuaternion::fromAxisAndAngle(axis, rotationDegrees);
+                    transform->rotation = rotation * m_dragStartRotation;
+                    break;
+                }
+            }
+            
             emit selectedEntityTransformChanged(m_selectedEntity);
             update();
         }
@@ -688,41 +823,48 @@ void OpenGLRenderer::mouseReleaseEvent(QMouseEvent* event)
 
 void OpenGLRenderer::renderColliders()
 {
-    if (!m_world) return;
+	if (!m_world) {
+		return;
+	}
 
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glLineWidth(2.0f);
+	glDisable(GL_DEPTH_TEST);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glLineWidth(3.0f);
 
-    m_shaderProgram->bind();
-    m_shaderProgram->setUniformValue("objectColor", QVector3D(0.0f, 1.0f, 0.0f));
+	m_shaderProgram->bind();
 
-    for (DabozzEngine::ECS::EntityID entity : m_world->getEntities()) {
-        DabozzEngine::ECS::Transform* transform = m_world->getComponent<DabozzEngine::ECS::Transform>(entity);
-        DabozzEngine::ECS::BoxCollider* boxCollider = m_world->getComponent<DabozzEngine::ECS::BoxCollider>(entity);
-        DabozzEngine::ECS::SphereCollider* sphereCollider = m_world->getComponent<DabozzEngine::ECS::SphereCollider>(entity);
+	for (DabozzEngine::ECS::EntityID entity : m_world->getEntities()) {
+		DabozzEngine::ECS::Transform *transform = m_world->getComponent<DabozzEngine::ECS::Transform>(entity);
+		DabozzEngine::ECS::BoxCollider *boxCollider = m_world->getComponent<DabozzEngine::ECS::BoxCollider>(entity);
+		DabozzEngine::ECS::SphereCollider *sphereCollider = m_world->getComponent<DabozzEngine::ECS::SphereCollider>(entity);
 
-        if (transform && (boxCollider || sphereCollider)) {
-            QMatrix4x4 modelMatrix = transform->getModelMatrix();
+		if (transform && (boxCollider || sphereCollider)) {
+			QMatrix4x4 modelMatrix = getWorldTransform(entity);
 
-            if (boxCollider) {
-                QMatrix4x4 scaleMatrix;
-                scaleMatrix.scale(boxCollider->size);
-                modelMatrix = modelMatrix * scaleMatrix;
-            }
+			if (boxCollider) {
+				QMatrix4x4 scaleMatrix;
+				scaleMatrix.scale(boxCollider->size);
+				modelMatrix = modelMatrix * scaleMatrix;
+				m_shaderProgram->setUniformValue("objectColor", QVector3D(0.0f, 1.0f, 0.0f));
+			} else if (sphereCollider) {
+				m_shaderProgram->setUniformValue("objectColor", QVector3D(0.0f, 0.8f, 1.0f));
+			}
 
-            m_shaderProgram->setUniformValue("model", modelMatrix);
-            m_shaderProgram->setUniformValue("view", m_view);
-            m_shaderProgram->setUniformValue("projection", m_projection);
+			m_shaderProgram->setUniformValue("model", modelMatrix);
+			m_shaderProgram->setUniformValue("view", m_view);
+			m_shaderProgram->setUniformValue("projection", m_projection);
+			m_shaderProgram->setUniformValue("useTexture", 0);
 
-            glBindVertexArray(m_vao);
-            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
-        }
-    }
+			glBindVertexArray(m_vao);
+			glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+			glBindVertexArray(0);
+		}
+	}
 
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    glLineWidth(1.0f);
-    m_shaderProgram->release();
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glLineWidth(1.0f);
+	glEnable(GL_DEPTH_TEST);
+	m_shaderProgram->release();
 }
 
 void OpenGLRenderer::renderGizmo()
@@ -737,57 +879,264 @@ void OpenGLRenderer::renderGizmo()
         return;
     }
 
-    // Calculate distance-based scale so gizmo is always visible
     const QVector3D viewPos = m_hasCamera ? m_cameraPosition : QVector3D(0.0f, 0.0f, 3.0f);
     float distanceToCamera = (transform->position - viewPos).length();
-    float gizmoScale = distanceToCamera * 0.15f; // Scale based on distance
+    float gizmoScale = distanceToCamera * 0.15f;
 
-    // Disable depth test so gizmo always renders on top
     glDisable(GL_DEPTH_TEST);
 
+    switch (m_gizmoMode) {
+        case GizmoMode::Translate:
+            renderTranslateGizmo(transform->position, gizmoScale);
+            break;
+        case GizmoMode::Rotate:
+            renderRotateGizmo(transform->position, gizmoScale);
+            break;
+        case GizmoMode::Scale:
+            renderScaleGizmo(transform->position, gizmoScale);
+            break;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+}
+
+void OpenGLRenderer::renderTranslateGizmo(const QVector3D& position, float scale)
+{
     m_shaderProgram->bind();
     m_shaderProgram->setUniformValue("view", m_view);
     m_shaderProgram->setUniformValue("projection", m_projection);
+    const QVector3D viewPos = m_hasCamera ? m_cameraPosition : QVector3D(0.0f, 0.0f, 3.0f);
     m_shaderProgram->setUniformValue("lightPos", QVector3D(2.0f, 2.0f, 2.0f));
     m_shaderProgram->setUniformValue("viewPos", viewPos);
     m_shaderProgram->setUniformValue("lightColor", QVector3D(1.0f, 1.0f, 1.0f));
-    m_shaderProgram->setUniformValue("useTexture", 0); // Disable textures for gizmo
+    m_shaderProgram->setUniformValue("useTexture", 0);
 
     glBindVertexArray(m_vao);
 
     auto axisColor = [this](GizmoAxis axis, const QVector3D& baseColor) {
         if (axis == m_activeAxis || axis == m_hoverAxis) {
-            return QVector3D(1.0f, 1.0f, 0.2f);
+            return QVector3D(1.0f, 1.0f, 0.0f);
         }
         return baseColor;
     };
 
-    auto drawAxis = [this, &transform, gizmoScale](GizmoAxis axis, const QVector3D& scale, const QVector3D& baseColor) {
+    auto drawAxis = [this, &position, scale](GizmoAxis axis, const QVector3D& axisScale, const QVector3D& color) {
         const QVector3D direction = axisDirection(axis);
-        const QVector3D offset = direction * (kGizmoAxisLength * 0.5f * gizmoScale);
+        const QVector3D offset = direction * (kGizmoAxisLength * 0.5f * scale);
         QMatrix4x4 model;
-        model.translate(transform->position + offset);
-        model.scale(scale * gizmoScale);
+        model.translate(position + offset);
+        model.scale(axisScale * scale);
         m_shaderProgram->setUniformValue("model", model);
-        m_shaderProgram->setUniformValue("objectColor", baseColor);
+        m_shaderProgram->setUniformValue("objectColor", color);
         glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
     };
 
-    drawAxis(GizmoAxis::X,
-             QVector3D(kGizmoAxisLength, kGizmoAxisThickness, kGizmoAxisThickness),
-             axisColor(GizmoAxis::X, QVector3D(1.0f, 0.1f, 0.1f)));
-    drawAxis(GizmoAxis::Y,
-             QVector3D(kGizmoAxisThickness, kGizmoAxisLength, kGizmoAxisThickness),
-             axisColor(GizmoAxis::Y, QVector3D(0.1f, 1.0f, 0.1f)));
-    drawAxis(GizmoAxis::Z,
-             QVector3D(kGizmoAxisThickness, kGizmoAxisThickness, kGizmoAxisLength),
-             axisColor(GizmoAxis::Z, QVector3D(0.1f, 0.4f, 1.0f)));
+    auto drawArrow = [this, &position, scale](GizmoAxis axis, const QVector3D& color) {
+        const QVector3D direction = axisDirection(axis);
+        const QVector3D offset = direction * (kGizmoAxisLength * scale);
+        QMatrix4x4 model;
+        model.translate(position + offset);
+        if (axis == GizmoAxis::X) {
+            model.rotate(90, 0, 0, 1);
+        } else if (axis == GizmoAxis::Z) {
+            model.rotate(90, 1, 0, 0);
+        }
+        model.scale(kGizmoArrowSize * scale);
+        m_shaderProgram->setUniformValue("model", model);
+        m_shaderProgram->setUniformValue("objectColor", color);
+        
+        glBindVertexArray(m_arrowVAO);
+        glDrawElements(GL_TRIANGLES, 48, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(m_vao);
+    };
+
+    // Draw axes
+    drawAxis(GizmoAxis::X, QVector3D(kGizmoAxisLength, kGizmoAxisThickness, kGizmoAxisThickness),
+             axisColor(GizmoAxis::X, QVector3D(0.8f, 0.0f, 0.0f)));
+    drawAxis(GizmoAxis::Y, QVector3D(kGizmoAxisThickness, kGizmoAxisLength, kGizmoAxisThickness),
+             axisColor(GizmoAxis::Y, QVector3D(0.0f, 0.8f, 0.0f)));
+    drawAxis(GizmoAxis::Z, QVector3D(kGizmoAxisThickness, kGizmoAxisThickness, kGizmoAxisLength),
+             axisColor(GizmoAxis::Z, QVector3D(0.0f, 0.4f, 0.8f)));
+
+    // Draw arrow tips
+    drawArrow(GizmoAxis::X, axisColor(GizmoAxis::X, QVector3D(1.0f, 0.0f, 0.0f)));
+    drawArrow(GizmoAxis::Y, axisColor(GizmoAxis::Y, QVector3D(0.0f, 1.0f, 0.0f)));
+    drawArrow(GizmoAxis::Z, axisColor(GizmoAxis::Z, QVector3D(0.0f, 0.5f, 1.0f)));
+
+    // Draw plane handles (semi-transparent)
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    auto drawPlane = [this, &position, scale](GizmoAxis axis, const QVector3D& color) {
+        QMatrix4x4 model;
+        model.translate(position);
+        if (axis == GizmoAxis::XY) {
+            model.translate(kGizmoPlaneSize * scale, kGizmoPlaneSize * scale, 0);
+        } else if (axis == GizmoAxis::YZ) {
+            model.translate(0, kGizmoPlaneSize * scale, kGizmoPlaneSize * scale);
+            model.rotate(90, 0, 1, 0);
+        } else if (axis == GizmoAxis::XZ) {
+            model.translate(kGizmoPlaneSize * scale, 0, kGizmoPlaneSize * scale);
+            model.rotate(90, 1, 0, 0);
+        }
+        model.scale(kGizmoPlaneSize * scale, kGizmoPlaneSize * scale, 0.01f * scale);
+        m_shaderProgram->setUniformValue("model", model);
+        QVector3D planeColor = (axis == m_activeAxis || axis == m_hoverAxis) ? QVector3D(1.0f, 1.0f, 0.0f) : color;
+        m_shaderProgram->setUniformValue("objectColor", QVector3D(planeColor.x(), planeColor.y(), planeColor.z()));
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+    };
+
+    drawPlane(GizmoAxis::XY, QVector3D(0.5f, 0.5f, 0.0f));
+    drawPlane(GizmoAxis::YZ, QVector3D(0.0f, 0.5f, 0.5f));
+    drawPlane(GizmoAxis::XZ, QVector3D(0.5f, 0.0f, 0.5f));
+
+    glDisable(GL_BLEND);
+    glBindVertexArray(0);
+    m_shaderProgram->release();
+}
+
+void OpenGLRenderer::renderRotateGizmo(const QVector3D& position, float scale)
+{
+    m_shaderProgram->bind();
+    m_shaderProgram->setUniformValue("view", m_view);
+    m_shaderProgram->setUniformValue("projection", m_projection);
+    const QVector3D viewPos = m_hasCamera ? m_cameraPosition : QVector3D(0.0f, 0.0f, 3.0f);
+    m_shaderProgram->setUniformValue("lightPos", QVector3D(2.0f, 2.0f, 2.0f));
+    m_shaderProgram->setUniformValue("viewPos", viewPos);
+    m_shaderProgram->setUniformValue("lightColor", QVector3D(1.0f, 1.0f, 1.0f));
+    m_shaderProgram->setUniformValue("useTexture", 0);
+
+    glBindVertexArray(m_vao);
+    glLineWidth(3.0f);
+
+    auto drawCircle = [this, &position, scale](GizmoAxis axis, const QVector3D& color) {
+        const int segments = 64;
+        const float radius = kGizmoAxisLength * scale;
+        const float thickness = kGizmoAxisThickness * 3.0f * scale;
+        
+        QVector3D finalColor = (axis == m_activeAxis || axis == m_hoverAxis) ? QVector3D(1.0f, 1.0f, 0.0f) : color;
+        
+        for (int i = 0; i < segments; ++i) {
+            float angle1 = (float)i / segments * 2.0f * M_PI;
+            float angle2 = (float)(i + 1) / segments * 2.0f * M_PI;
+            
+            QVector3D p1, p2;
+            if (axis == GizmoAxis::X) {
+                p1 = QVector3D(0, cos(angle1) * radius, sin(angle1) * radius);
+                p2 = QVector3D(0, cos(angle2) * radius, sin(angle2) * radius);
+            } else if (axis == GizmoAxis::Y) {
+                p1 = QVector3D(cos(angle1) * radius, 0, sin(angle1) * radius);
+                p2 = QVector3D(cos(angle2) * radius, 0, sin(angle2) * radius);
+            } else {
+                p1 = QVector3D(cos(angle1) * radius, sin(angle1) * radius, 0);
+                p2 = QVector3D(cos(angle2) * radius, sin(angle2) * radius, 0);
+            }
+            
+            // Draw a small cylinder segment
+            QVector3D mid = (p1 + p2) * 0.5f;
+            QVector3D dir = (p2 - p1).normalized();
+            float length = (p2 - p1).length();
+            
+            QMatrix4x4 model;
+            model.translate(position + mid);
+            
+            // Orient the cylinder along the segment
+            QVector3D up(0, 1, 0);
+            if (qAbs(QVector3D::dotProduct(dir, up)) > 0.99f) {
+                up = QVector3D(1, 0, 0);
+            }
+            QVector3D right = QVector3D::crossProduct(dir, up).normalized();
+            up = QVector3D::crossProduct(right, dir).normalized();
+            
+            QMatrix4x4 rotation;
+            rotation.setColumn(0, QVector4D(right, 0));
+            rotation.setColumn(1, QVector4D(up, 0));
+            rotation.setColumn(2, QVector4D(dir, 0));
+            rotation.setColumn(3, QVector4D(0, 0, 0, 1));
+            
+            model = model * rotation;
+            model.scale(thickness, thickness, length);
+            
+            m_shaderProgram->setUniformValue("model", model);
+            m_shaderProgram->setUniformValue("objectColor", finalColor);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+    };
+
+    drawCircle(GizmoAxis::X, QVector3D(1.0f, 0.0f, 0.0f));
+    drawCircle(GizmoAxis::Y, QVector3D(0.0f, 1.0f, 0.0f));
+    drawCircle(GizmoAxis::Z, QVector3D(0.0f, 0.5f, 1.0f));
+
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
+    m_shaderProgram->release();
+}
+
+void OpenGLRenderer::renderScaleGizmo(const QVector3D& position, float scale)
+{
+    m_shaderProgram->bind();
+    m_shaderProgram->setUniformValue("view", m_view);
+    m_shaderProgram->setUniformValue("projection", m_projection);
+    const QVector3D viewPos = m_hasCamera ? m_cameraPosition : QVector3D(0.0f, 0.0f, 3.0f);
+    m_shaderProgram->setUniformValue("lightPos", QVector3D(2.0f, 2.0f, 2.0f));
+    m_shaderProgram->setUniformValue("viewPos", viewPos);
+    m_shaderProgram->setUniformValue("lightColor", QVector3D(1.0f, 1.0f, 1.0f));
+    m_shaderProgram->setUniformValue("useTexture", 0);
+
+    glBindVertexArray(m_vao);
+
+    auto axisColor = [this](GizmoAxis axis, const QVector3D& baseColor) {
+        if (axis == m_activeAxis || axis == m_hoverAxis) {
+            return QVector3D(1.0f, 1.0f, 0.0f);
+        }
+        return baseColor;
+    };
+
+    auto drawAxis = [this, &position, scale](GizmoAxis axis, const QVector3D& axisScale, const QVector3D& color) {
+        const QVector3D direction = axisDirection(axis);
+        const QVector3D offset = direction * (kGizmoAxisLength * 0.5f * scale);
+        QMatrix4x4 model;
+        model.translate(position + offset);
+        model.scale(axisScale * scale);
+        m_shaderProgram->setUniformValue("model", model);
+        m_shaderProgram->setUniformValue("objectColor", color);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+    };
+
+    auto drawCube = [this, &position, scale](GizmoAxis axis, const QVector3D& color) {
+        const QVector3D direction = axisDirection(axis);
+        const QVector3D offset = direction * (kGizmoAxisLength * scale);
+        QMatrix4x4 model;
+        model.translate(position + offset);
+        model.scale(kGizmoArrowSize * scale);
+        m_shaderProgram->setUniformValue("model", model);
+        m_shaderProgram->setUniformValue("objectColor", color);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+    };
+
+    // Draw axes
+    drawAxis(GizmoAxis::X, QVector3D(kGizmoAxisLength, kGizmoAxisThickness, kGizmoAxisThickness),
+             axisColor(GizmoAxis::X, QVector3D(0.8f, 0.0f, 0.0f)));
+    drawAxis(GizmoAxis::Y, QVector3D(kGizmoAxisThickness, kGizmoAxisLength, kGizmoAxisThickness),
+             axisColor(GizmoAxis::Y, QVector3D(0.0f, 0.8f, 0.0f)));
+    drawAxis(GizmoAxis::Z, QVector3D(kGizmoAxisThickness, kGizmoAxisThickness, kGizmoAxisLength),
+             axisColor(GizmoAxis::Z, QVector3D(0.0f, 0.4f, 0.8f)));
+
+    // Draw cube handles
+    drawCube(GizmoAxis::X, axisColor(GizmoAxis::X, QVector3D(1.0f, 0.0f, 0.0f)));
+    drawCube(GizmoAxis::Y, axisColor(GizmoAxis::Y, QVector3D(0.0f, 1.0f, 0.0f)));
+    drawCube(GizmoAxis::Z, axisColor(GizmoAxis::Z, QVector3D(0.0f, 0.5f, 1.0f)));
+
+    // Center cube for uniform scale
+    QMatrix4x4 model;
+    model.translate(position);
+    model.scale(kGizmoArrowSize * 0.7f * scale);
+    m_shaderProgram->setUniformValue("model", model);
+    m_shaderProgram->setUniformValue("objectColor", axisColor(GizmoAxis::Center, QVector3D(0.8f, 0.8f, 0.8f)));
+    glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
 
     glBindVertexArray(0);
     m_shaderProgram->release();
-    
-    // Re-enable depth test
-    glEnable(GL_DEPTH_TEST);
 }
 
 OpenGLRenderer::Ray OpenGLRenderer::makeRayFromMouse(const QPointF& mousePos) const
@@ -829,8 +1178,12 @@ OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const QPointF& mousePos)
     if (!transform) return GizmoAxis::None;
 
     const Ray ray = makeRayFromMouse(mousePos);
-    const float halfPick = kGizmoPickThickness * 0.5f;
-    const float halfLength = kGizmoAxisLength * 0.5f;
+    const QVector3D viewPos = m_hasCamera ? m_cameraPosition : QVector3D(0.0f, 0.0f, 3.0f);
+    float distanceToCamera = (transform->position - viewPos).length();
+    float gizmoScale = distanceToCamera * 0.15f;
+    
+    const float halfPick = kGizmoPickThickness * 0.5f * gizmoScale;
+    const float halfLength = kGizmoAxisLength * 0.5f * gizmoScale;
 
     struct HitResult {
         GizmoAxis axis;
@@ -839,22 +1192,93 @@ OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const QPointF& mousePos)
 
     HitResult bestHit { GizmoAxis::None, std::numeric_limits<float>::max() };
 
-    auto testAxis = [&](GizmoAxis axis, const QVector3D& halfExtents) {
-        const QVector3D center = transform->position + axisDirection(axis) * halfLength;
-        const QVector3D boxMin = center - halfExtents;
-        const QVector3D boxMax = center + halfExtents;
-        float t = 0.0f;
-        if (intersectRayAabb(ray.origin, ray.direction, boxMin, boxMax, t)) {
-            if (t < bestHit.t) {
-                bestHit.axis = axis;
-                bestHit.t = t;
+    if (m_gizmoMode == GizmoMode::Rotate) {
+        // Pick rotation circles
+        const float radius = kGizmoAxisLength * gizmoScale;
+        const float thickness = kGizmoPickThickness * gizmoScale;
+        
+        auto testCircle = [&](GizmoAxis axis) {
+            // Test distance from ray to circle
+            QVector3D planeNormal = axisDirection(axis);
+            float denom = QVector3D::dotProduct(planeNormal, ray.direction);
+            if (qAbs(denom) > 0.0001f) {
+                float t = QVector3D::dotProduct(transform->position - ray.origin, planeNormal) / denom;
+                if (t > 0) {
+                    QVector3D hitPoint = ray.origin + ray.direction * t;
+                    float dist = (hitPoint - transform->position).length();
+                    if (qAbs(dist - radius) < thickness && t < bestHit.t) {
+                        bestHit.axis = axis;
+                        bestHit.t = t;
+                    }
+                }
+            }
+        };
+        
+        testCircle(GizmoAxis::X);
+        testCircle(GizmoAxis::Y);
+        testCircle(GizmoAxis::Z);
+        
+    } else {
+        // Pick translate/scale axes
+        auto testAxis = [&](GizmoAxis axis, const QVector3D& halfExtents) {
+            const QVector3D center = transform->position + axisDirection(axis) * halfLength;
+            const QVector3D boxMin = center - halfExtents;
+            const QVector3D boxMax = center + halfExtents;
+            float t = 0.0f;
+            if (intersectRayAabb(ray.origin, ray.direction, boxMin, boxMax, t)) {
+                if (t < bestHit.t) {
+                    bestHit.axis = axis;
+                    bestHit.t = t;
+                }
+            }
+        };
+
+        testAxis(GizmoAxis::X, QVector3D(halfLength, halfPick, halfPick));
+        testAxis(GizmoAxis::Y, QVector3D(halfPick, halfLength, halfPick));
+        testAxis(GizmoAxis::Z, QVector3D(halfPick, halfPick, halfLength));
+        
+        // Test plane handles for translate mode
+        if (m_gizmoMode == GizmoMode::Translate) {
+            const float planeSize = kGizmoPlaneSize * gizmoScale;
+            auto testPlane = [&](GizmoAxis axis, const QVector3D& planeNormal) {
+                float denom = QVector3D::dotProduct(planeNormal, ray.direction);
+                if (qAbs(denom) > 0.0001f) {
+                    float t = QVector3D::dotProduct(transform->position - ray.origin, planeNormal) / denom;
+                    if (t > 0) {
+                        QVector3D hitPoint = ray.origin + ray.direction * t;
+                        QVector3D localHit = hitPoint - transform->position;
+                        
+                        if (axis == GizmoAxis::XY) {
+                            if (localHit.x() > 0 && localHit.x() < planeSize * 2 &&
+                                localHit.y() > 0 && localHit.y() < planeSize * 2 &&
+                                qAbs(localHit.z()) < 0.1f && t < bestHit.t) {
+                                bestHit.axis = axis;
+                                bestHit.t = t;
+                            }
+                        }
+                    }
+                }
+            };
+            
+            testPlane(GizmoAxis::XY, QVector3D(0, 0, 1));
+            testPlane(GizmoAxis::YZ, QVector3D(1, 0, 0));
+            testPlane(GizmoAxis::XZ, QVector3D(0, 1, 0));
+        }
+        
+        // Test center cube for scale mode
+        if (m_gizmoMode == GizmoMode::Scale) {
+            const float centerSize = kGizmoArrowSize * 0.7f * gizmoScale;
+            const QVector3D boxMin = transform->position - QVector3D(centerSize, centerSize, centerSize);
+            const QVector3D boxMax = transform->position + QVector3D(centerSize, centerSize, centerSize);
+            float t = 0.0f;
+            if (intersectRayAabb(ray.origin, ray.direction, boxMin, boxMax, t)) {
+                if (t < bestHit.t) {
+                    bestHit.axis = GizmoAxis::Center;
+                    bestHit.t = t;
+                }
             }
         }
-    };
-
-    testAxis(GizmoAxis::X, QVector3D(halfLength, halfPick, halfPick));
-    testAxis(GizmoAxis::Y, QVector3D(halfPick, halfLength, halfPick));
-    testAxis(GizmoAxis::Z, QVector3D(halfPick, halfPick, halfLength));
+    }
 
     return bestHit.axis;
 }
@@ -1102,4 +1526,81 @@ QMatrix4x4 OpenGLRenderer::getWorldTransform(DabozzEngine::ECS::EntityID entity)
     
     // No parent, return local transform
     return localMatrix;
+}
+
+
+void OpenGLRenderer::setupSkybox()
+{
+    m_skyboxShader = new QOpenGLShaderProgram();
+    m_skyboxShader->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/skybox_vertex.glsl");
+    m_skyboxShader->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/skybox_fragment.glsl");
+    m_skyboxShader->link();
+    
+    float skyboxVertices[] = {
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+        -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f
+    };
+    
+    glGenVertexArrays(1, &m_skyboxVAO);
+    glGenBuffers(1, &m_skyboxVBO);
+    glBindVertexArray(m_skyboxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_skyboxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), &skyboxVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glBindVertexArray(0);
+}
+
+void OpenGLRenderer::renderSkybox()
+{
+    glDepthFunc(GL_LEQUAL);
+    m_skyboxShader->bind();
+    m_skyboxShader->setUniformValue("view", m_view);
+    m_skyboxShader->setUniformValue("projection", m_projection);
+    m_skyboxShader->setUniformValue("time", (float)m_rotationAngle);
+    m_skyboxShader->setUniformValue("sun_direction", QVector3D(0.5f, 0.5f, -0.5f));
+    glBindVertexArray(m_skyboxVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+    glDepthFunc(GL_LESS);
+    m_skyboxShader->release();
 }

@@ -5,6 +5,7 @@
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
 #include <QProcess>
+#include <QRegularExpression>
 
 class CSharpHighlighter : public QSyntaxHighlighter {
     Q_OBJECT

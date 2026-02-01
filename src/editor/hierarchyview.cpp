@@ -7,6 +7,11 @@
 #include <QHeaderView>
 #include <QMenu>
 #include <QInputDialog>
+#include <QKeyEvent>
+#include "editor/undostack.h"
+#include "ecs/components/rigidbody.h"
+#include "ecs/components/boxcollider.h"
+#include "ecs/components/spherecollider.h"
 
 HierarchyView::HierarchyView(QWidget* parent)
     : QWidget(parent)
@@ -246,11 +251,115 @@ void HierarchyView::onCreateCamera()
 void HierarchyView::onDeleteEntity()
 {
     if (!m_world) return;
-    
+
     QTreeWidgetItem* item = m_treeWidget->currentItem();
     if (item) {
         DabozzEngine::ECS::EntityID entity = item->data(0, Qt::UserRole).value<DabozzEngine::ECS::EntityID>();
-        m_world->destroyEntity(entity);
-        refreshHierarchy();
+        if (m_undoStack) {
+            m_undoStack->push(new DeleteEntityCommand(m_world, entity, [this]() {
+                refreshHierarchy();
+            }));
+        } else {
+            m_world->destroyEntity(entity);
+            refreshHierarchy();
+        }
     }
+}
+
+void HierarchyView::setUndoStack(QUndoStack* undoStack)
+{
+    m_undoStack = undoStack;
+}
+
+void HierarchyView::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+        onDeleteEntity();
+    } else if (event->key() == Qt::Key_D && (event->modifiers() & Qt::ControlModifier)) {
+        duplicateSelectedEntity();
+    } else if (event->key() == Qt::Key_F2) {
+        QTreeWidgetItem* item = m_treeWidget->currentItem();
+        if (item) {
+            DabozzEngine::ECS::EntityID entity = item->data(0, Qt::UserRole).value<DabozzEngine::ECS::EntityID>();
+            bool ok;
+            auto* nameComp = m_world->getComponent<DabozzEngine::ECS::Name>(entity);
+            QString currentName = nameComp ? nameComp->name : "";
+            QString newName = QInputDialog::getText(this, "Rename Entity", "Name:", QLineEdit::Normal, currentName, &ok);
+            if (ok && !newName.isEmpty()) {
+                if (nameComp) nameComp->name = newName;
+                else m_world->addComponent<DabozzEngine::ECS::Name>(entity, newName);
+                refreshHierarchy();
+            }
+        }
+    } else {
+        QWidget::keyPressEvent(event);
+    }
+}
+
+void HierarchyView::duplicateSelectedEntity()
+{
+    if (!m_world) return;
+
+    QTreeWidgetItem* item = m_treeWidget->currentItem();
+    if (!item) return;
+
+    DabozzEngine::ECS::EntityID srcEntity = item->data(0, Qt::UserRole).value<DabozzEngine::ECS::EntityID>();
+    DabozzEngine::ECS::EntityID newEntity = m_world->createEntity();
+
+    auto* srcName = m_world->getComponent<DabozzEngine::ECS::Name>(srcEntity);
+    if (srcName) {
+        m_world->addComponent<DabozzEngine::ECS::Name>(newEntity, srcName->name + " (Copy)");
+    }
+
+    auto* srcTransform = m_world->getComponent<DabozzEngine::ECS::Transform>(srcEntity);
+    if (srcTransform) {
+        auto* t = m_world->addComponent<DabozzEngine::ECS::Transform>(newEntity);
+        t->position = srcTransform->position;
+        t->rotation = srcTransform->rotation;
+        t->scale = srcTransform->scale;
+    }
+
+    if (m_world->hasComponent<DabozzEngine::ECS::Hierarchy>(srcEntity)) {
+        m_world->addComponent<DabozzEngine::ECS::Hierarchy>(newEntity);
+    }
+
+    auto* srcRb = m_world->getComponent<DabozzEngine::ECS::RigidBody>(srcEntity);
+    if (srcRb) {
+        m_world->addComponent<DabozzEngine::ECS::RigidBody>(newEntity, srcRb->mass, srcRb->isStatic, srcRb->useGravity);
+    }
+
+    auto* srcBc = m_world->getComponent<DabozzEngine::ECS::BoxCollider>(srcEntity);
+    if (srcBc) {
+        m_world->addComponent<DabozzEngine::ECS::BoxCollider>(newEntity, srcBc->size, srcBc->isTrigger);
+    }
+
+    auto* srcSc = m_world->getComponent<DabozzEngine::ECS::SphereCollider>(srcEntity);
+    if (srcSc) {
+        m_world->addComponent<DabozzEngine::ECS::SphereCollider>(newEntity, srcSc->radius, srcSc->isTrigger);
+    }
+
+    if (m_world->hasComponent<DabozzEngine::ECS::FirstPersonController>(srcEntity)) {
+        m_world->addComponent<DabozzEngine::ECS::FirstPersonController>(newEntity);
+    }
+
+    auto* srcMesh = m_world->getComponent<DabozzEngine::ECS::Mesh>(srcEntity);
+    if (srcMesh) {
+        auto* m = m_world->addComponent<DabozzEngine::ECS::Mesh>(newEntity);
+        m->vertices = srcMesh->vertices;
+        m->normals = srcMesh->normals;
+        m->texCoords = srcMesh->texCoords;
+        m->indices = srcMesh->indices;
+        m->modelPath = srcMesh->modelPath;
+        m->texturePath = srcMesh->texturePath;
+        m->hasTexture = srcMesh->hasTexture;
+        m->hasAnimation = srcMesh->hasAnimation;
+        m->boneIds = srcMesh->boneIds;
+        m->boneWeights = srcMesh->boneWeights;
+        m->embeddedTextureData = srcMesh->embeddedTextureData;
+        m->embeddedTextureWidth = srcMesh->embeddedTextureWidth;
+        m->embeddedTextureHeight = srcMesh->embeddedTextureHeight;
+    }
+
+    refreshHierarchy();
+    emit entitySelected(newEntity);
 }

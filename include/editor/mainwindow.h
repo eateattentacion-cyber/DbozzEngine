@@ -5,9 +5,11 @@
 #include <QToolBar>
 #include <QStatusBar>
 #include <QTimer>
+#include <QTabWidget>
 #include <QVector3D>
 #include <QQuaternion>
 #include <map>
+#include <QUndoStack>
 #include "ecs/world.h"
 
 namespace DabozzEngine {
@@ -48,6 +50,8 @@ private slots:
     void onPauseClicked();
     void onStopClicked();
     void updateGameLoop();
+    void onDeleteSelected();
+    void onDuplicateSelected();
 
 public:
     bool isPlayMode() const { return m_editorMode == EditorMode::Play || m_editorMode == EditorMode::Paused; }
@@ -73,6 +77,7 @@ private:
     AnimatorGraphEditor* m_animatorGraphEditor;
     ScriptEditor* m_scriptEditor;
     GameWindow* m_gameWindow;
+    QTabWidget* m_centralTabs;
     DabozzEngine::ECS::World* m_world;
     DabozzEngine::Physics::ButsuriEngine* m_butsuri;
     DabozzEngine::Systems::PhysicsSystem* m_physicsSystem;
@@ -86,7 +91,11 @@ private:
     
     QToolBar* m_mainToolBar;
     QToolBar* m_editToolBar;
-    
+
+    QUndoStack* m_undoStack;
+    QString m_currentScenePath;
+    bool m_sceneDirty = false;
+
     EditorMode m_editorMode;
     DabozzEngine::ECS::EntityID m_selectedEntity = DabozzEngine::ECS::INVALID_ENTITY;
 

@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QVBoxLayout>
+#include <QUndoStack>
 #include "ecs/world.h"
 
 namespace DabozzEngine {
@@ -24,6 +25,7 @@ public:
     ~ComponentInspector();
 
     void setWorld(DabozzEngine::ECS::World* world);
+    void setUndoStack(QUndoStack* undoStack);
     void setSelectedEntity(DabozzEngine::ECS::EntityID entity);
     void clearSelection();
 
@@ -70,4 +72,10 @@ private:
     
     DabozzEngine::ECS::World* m_world;
     DabozzEngine::ECS::EntityID m_selectedEntity;
+    QUndoStack* m_undoStack = nullptr;
+
+    QVector3D m_prevPosition;
+    QQuaternion m_prevRotation;
+    QVector3D m_prevScale;
+    QString m_prevName;
 };

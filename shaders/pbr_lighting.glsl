@@ -1,21 +1,10 @@
-#version 330 core
-
-in vec3 FragPos;
-in vec3 Normal;
-in vec2 TexCoord;
-
-out vec4 FragColor;
-
-uniform vec3 lightPos;
-uniform vec3 viewPos;
-uniform vec3 lightColor;
-uniform vec3 objectColor;
-uniform int useTexture;
-uniform sampler2D textureSampler;
-
-uniform float roughness;
-uniform float metallic;
-uniform float specular;
+/**
+ * @file pbr_lighting.glsl
+ * @brief PBR lighting functions for DabozzEngine
+ * 
+ * Adapted from Godot Engine (MIT License)
+ * https://github.com/godotengine/godot
+ */
 
 #define M_PI 3.14159265359
 
@@ -89,32 +78,17 @@ void ComputePBRLight(
     }
 }
 
-void main()
-{
-    vec3 N = normalize(Normal);
-    vec3 V = normalize(viewPos - FragPos);
-    vec3 L = normalize(lightPos - FragPos);
-    
-    vec3 albedo;
-    if (useTexture == 1) {
-        albedo = texture(textureSampler, TexCoord).rgb;
-    } else {
-        albedo = objectColor;
-    }
-    
-    float dist = length(lightPos - FragPos);
-    float attenuation = 1.0 / (1.0 + 0.014 * dist + 0.0007 * dist * dist);
-    
-    vec3 diffuseLight = vec3(0.0);
-    vec3 specularLight = vec3(0.0);
-    
-    ComputePBRLight(N, L, V, lightColor, attenuation, albedo, roughness, metallic, specular, diffuseLight, specularLight);
-    
-    diffuseLight *= albedo;
-    diffuseLight *= (1.0 - metallic);
-    
-    vec3 ambient = vec3(0.15) * albedo * (1.0 - metallic);
-    vec3 result = ambient + diffuseLight + specularLight;
-    
-    FragColor = vec4(result, 1.0);
+float GetOmniAttenuation(float distance, float invRadius, float decay) {
+    float nd = distance * invRadius;
+    nd *= nd;
+    nd *= nd;
+    nd = max(1.0 - nd, 0.0);
+    nd *= nd;
+    return nd * pow(max(distance, 0.0001), -decay);
+}
+
+float GetSpotAttenuation(vec3 lightDir, vec3 spotDir, float coneAngle, float coneAttenuation) {
+    float scos = max(dot(-lightDir, spotDir), coneAngle);
+    float spotRim = max(1e-4, (1.0 - scos) / (1.0 - coneAngle));
+    return 1.0 - pow(spotRim, coneAttenuation);
 }
