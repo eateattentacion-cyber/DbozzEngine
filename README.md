@@ -26,31 +26,23 @@ A lightweight, open-source game engine built from scratch in C++ with OpenGL and
 ### Build Steps
 
 ```bash
-# Clone
 git clone https://github.com/eateattentacion-cyber/DbozzEngine.git
 cd DbozzEngine
 
-# Build OpenAL
 cd openal-soft/build
 cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 mingw32-make -j8
 cd ../..
 
-# Build the engine
 python pbj.py build --target release
 
-# Build the hub
 cd dabozzhub
 python pbj.py build --target release
 cd ..
 
-# Run
 ./bin/DabozzHub.exe
 ```
 
-## Screenshots
-
-*Coming soon*
 
 ## License
 
