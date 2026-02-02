@@ -192,7 +192,13 @@ bool ProjectManager::createProjectDirectory(const QString& path) {
     QDir dir(path);
     if (!dir.mkpath(".")) return false;
 
-    QFile sceneFile(path + "/main.dabozz");
+    // Create standard project folders
+    dir.mkpath("Scenes");
+    dir.mkpath("Assets");
+    dir.mkpath("Scripts");
+
+    // Create default scene in Scenes folder
+    QFile sceneFile(path + "/Scenes/main.dabozz");
     if (sceneFile.open(QIODevice::WriteOnly)) {
         QJsonObject root;
         root["version"] = 1;

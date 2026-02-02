@@ -40,6 +40,7 @@ env.add_includes([
     "assimp_build/include",
     "assimp_source/contrib/stb",
     "glm",
+    "openal-soft/include",
     "C:/Program Files/Mono/include/mono-2.0",
     "C:/Qt/6.10.2/mingw_64/include",
     "C:/Qt/6.10.2/mingw_64/include/QtOpenGLWidgets",
@@ -85,6 +86,7 @@ env.add_lib_dirs([
     "C:/Qt/6.10.2/mingw_64/lib",
     "C:/Program Files/Mono/lib",
     "assimp_build/bin",
+    "openal-soft/build",
 ])
 
 env.add_ldflags([
@@ -102,6 +104,7 @@ env.add_libs([
     "glu32",
     "assimp-5",
     "mono-2.0-sgen",
+    "OpenAL32",
 ])
 
 env.add_ldflags([
@@ -121,5 +124,6 @@ for dll in ["libgcc_s_seh-1", "libstdc++-6", "libwinpthread-1"]:
     env.deploy(f"{MINGW_BIN}/{dll}.dll")
 
 env.deploy("assimp_build/bin/libassimp-5.dll")
+env.deploy("openal-soft/build/OpenAL32.dll")
 
 env.deploy_dir(f"{QT_BIN}/../plugins/platforms", "platforms")

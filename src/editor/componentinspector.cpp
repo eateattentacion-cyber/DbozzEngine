@@ -8,6 +8,7 @@
 #include "ecs/components/firstpersoncontroller.h"
 #include "ecs/components/animator.h"
 #include "ecs/components/hierarchy.h"
+#include "ecs/components/audiosource.h"
 #include <QGroupBox>
 #include <QComboBox>
 #include <QLabel>
@@ -16,6 +17,7 @@
 #include <QSignalBlocker>
 #include <typeinfo>
 #include <QHBoxLayout>
+#include <QFileDialog>
 #include "editor/undostack.h"
 
 ComponentInspector::ComponentInspector(QWidget* parent)
@@ -245,13 +247,15 @@ void ComponentInspector::onAddComponentClicked()
     QAction* sphereColliderAction = menu.addAction("SphereCollider");
     QAction* meshAction = menu.addAction("Mesh");
     QAction* fpControllerAction = menu.addAction("FirstPersonController");
+    QAction* audioSourceAction = menu.addAction("AudioSource");
 
     rigidBodyAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::RigidBody>(m_selectedEntity));
     boxColliderAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::BoxCollider>(m_selectedEntity));
     sphereColliderAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::SphereCollider>(m_selectedEntity));
     meshAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::Mesh>(m_selectedEntity));
     fpControllerAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::FirstPersonController>(m_selectedEntity));
-    
+    audioSourceAction->setEnabled(!m_world->hasComponent<DabozzEngine::ECS::AudioSource>(m_selectedEntity));
+
     QAction* selectedAction = menu.exec(QCursor::pos());
     
     if (selectedAction == rigidBodyAction) {
@@ -264,6 +268,8 @@ void ComponentInspector::onAddComponentClicked()
         m_world->addComponent<DabozzEngine::ECS::Mesh>(m_selectedEntity);
     } else if (selectedAction == fpControllerAction) {
         m_world->addComponent<DabozzEngine::ECS::FirstPersonController>(m_selectedEntity);
+    } else if (selectedAction == audioSourceAction) {
+        m_world->addComponent<DabozzEngine::ECS::AudioSource>(m_selectedEntity);
     }
     
     updateUI();
@@ -389,6 +395,8 @@ void ComponentInspector::updateComponentsList()
             displayName = "FirstPersonController";
         } else if (typeId == typeid(DabozzEngine::ECS::Animator)) {
             displayName = "Animator";
+        } else if (typeId == typeid(DabozzEngine::ECS::AudioSource)) {
+            displayName = "AudioSource";
         } else {
             displayName = QString::fromStdString(typeId.name());
         }
@@ -422,6 +430,8 @@ void ComponentInspector::updateComponentsList()
                     m_world->removeComponent<DabozzEngine::ECS::FirstPersonController>(entity);
                 else if (capturedType == typeid(DabozzEngine::ECS::Animator))
                     m_world->removeComponent<DabozzEngine::ECS::Animator>(entity);
+                else if (capturedType == typeid(DabozzEngine::ECS::AudioSource))
+                    m_world->removeComponent<DabozzEngine::ECS::AudioSource>(entity);
                 updateUI();
             });
 
@@ -490,6 +500,30 @@ void ComponentInspector::updateComponentsList()
                     formLayout->addRow("Active Clip:", clipCombo);
                     componentLayout->addLayout(formLayout);
                 }
+            }
+        } else if (typeId == typeid(DabozzEngine::ECS::AudioSource)) {
+            DabozzEngine::ECS::AudioSource* audio = static_cast<DabozzEngine::ECS::AudioSource*>(component.get());
+            if (audio) {
+                componentLayout->addWidget(new QLabel(QString("File: %1").arg(audio->filePath.isEmpty() ? "None" : audio->filePath)));
+                componentLayout->addWidget(new QLabel(QString("Volume: %1").arg(audio->volume)));
+                componentLayout->addWidget(new QLabel(QString("Pitch: %1").arg(audio->pitch)));
+                componentLayout->addWidget(new QLabel(QString("Loop: %1").arg(audio->loop ? "Yes" : "No")));
+                componentLayout->addWidget(new QLabel(QString("Playing: %1").arg(audio->isPlaying ? "Yes" : "No")));
+
+                QPushButton* browseBtn = new QPushButton("Browse WAV...");
+                DabozzEngine::ECS::EntityID entity = m_selectedEntity;
+                connect(browseBtn, &QPushButton::clicked, this, [this, entity]() {
+                    if (!m_world) return;
+                    DabozzEngine::ECS::AudioSource* a = m_world->getComponent<DabozzEngine::ECS::AudioSource>(entity);
+                    if (!a) return;
+                    QString path = QFileDialog::getOpenFileName(this, "Select Audio File", QString(), "WAV Files (*.wav)");
+                    if (!path.isEmpty()) {
+                        a->filePath = path;
+                        a->isLoaded = false;
+                        updateUI();
+                    }
+                });
+                componentLayout->addWidget(browseBtn);
             }
         } else {
             componentLayout->addWidget(new QLabel(displayName));

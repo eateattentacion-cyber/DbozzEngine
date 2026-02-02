@@ -7,7 +7,12 @@ int main(int argc, char* argv[])
     app.setApplicationName("DabozzEditor");
     app.setOrganizationName("Dabozz Studios");
     
-    MainWindow window;
+    QString projectPath;
+    if (argc > 1) {
+        projectPath = QString::fromLocal8Bit(argv[1]);
+    }
+
+    MainWindow window(projectPath);
     window.showMaximized();
     
     return app.exec();

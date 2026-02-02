@@ -16,6 +16,7 @@ namespace DabozzEngine {
 namespace Systems {
     class PhysicsSystem;
     class AnimationSystem;
+    class AudioSystem;
 }
 namespace Physics {
     class ButsuriEngine;
@@ -28,13 +29,14 @@ class ComponentInspector;
 class HierarchyView;
 class AnimatorGraphEditor;
 class ScriptEditor;
+class AssetBrowser;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget* parent = nullptr);
+    MainWindow(const QString& projectPath = QString(), QWidget* parent = nullptr);
     ~MainWindow();
 
 private slots:
@@ -52,6 +54,7 @@ private slots:
     void updateGameLoop();
     void onDeleteSelected();
     void onDuplicateSelected();
+    void onAssetDoubleClicked(const QString& filePath);
 
 public:
     bool isPlayMode() const { return m_editorMode == EditorMode::Play || m_editorMode == EditorMode::Paused; }
@@ -82,6 +85,7 @@ private:
     DabozzEngine::Physics::ButsuriEngine* m_butsuri;
     DabozzEngine::Systems::PhysicsSystem* m_physicsSystem;
     DabozzEngine::Systems::AnimationSystem* m_animationSystem;
+    DabozzEngine::Systems::AudioSystem* m_audioSystem;
     QTimer* m_gameLoopTimer;
     
     QMenu* m_fileMenu;
@@ -91,8 +95,10 @@ private:
     
     QToolBar* m_mainToolBar;
     QToolBar* m_editToolBar;
+    AssetBrowser* m_assetBrowser;
 
     QUndoStack* m_undoStack;
+    QString m_projectPath;
     QString m_currentScenePath;
     bool m_sceneDirty = false;
 
@@ -112,6 +118,7 @@ private:
     std::map<DabozzEngine::ECS::EntityID, SavedEntityState> m_savedState;
 
     void applyDarkTheme();
+    void initProject();
     void saveSceneState();
     void restoreSceneState();
 };

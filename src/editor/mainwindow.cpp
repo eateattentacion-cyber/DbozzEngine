@@ -1,5 +1,6 @@
 #include "editor/mainwindow.h"
 #include <QApplication>
+#include "editor/assetbrowser.h"
 #include "editor/sceneview.h"
 #include "editor/componentinspector.h"
 #include "editor/hierarchyview.h"
@@ -14,6 +15,7 @@
 #include "ecs/components/hierarchy.h"
 #include "ecs/components/animator.h"
 #include "ecs/systems/animationsystem.h"
+#include "ecs/systems/audiosystem.h"
 #include "renderer/meshloader.h"
 #include "renderer/animation.h"
 #include "renderer/skeleton.h"
@@ -23,11 +25,12 @@
 #include "editor/undostack.h"
 #include "editor/scenefile.h"
 #include "debug/logger.h"
+#include <QDir>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QTimer>
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(const QString& projectPath, QWidget* parent)
     : QMainWindow(parent)
     , m_world(new DabozzEngine::ECS::World())
     , m_gameWindow(nullptr)
@@ -36,8 +39,10 @@ MainWindow::MainWindow(QWidget* parent)
     , m_butsuri(nullptr)
     , m_physicsSystem(nullptr)
     , m_animationSystem(nullptr)
+    , m_audioSystem(nullptr)
     , m_gameLoopTimer(new QTimer(this))
     , m_undoStack(new QUndoStack(this))
+    , m_projectPath(projectPath)
     , m_editorMode(EditorMode::Edit)
 {
     setWindowTitle("Dabozz Editor");
@@ -49,14 +54,21 @@ MainWindow::MainWindow(QWidget* parent)
     createDockWidgets();
     createStatusBar();
     setupLayout();
-    
+
     connectViews();
-    createSampleEntities();
+
+    if (!m_projectPath.isEmpty()) {
+        initProject();
+    } else {
+        createSampleEntities();
+    }
     
-    // Don't initialize physics at startup - do it when entering play mode
+    // Don't initialize physics at startup - do it when entering play mode(engine might crash.)
     m_butsuri = nullptr;
     m_physicsSystem = nullptr;
     m_animationSystem = new DabozzEngine::Systems::AnimationSystem(m_world);
+    m_audioSystem = new DabozzEngine::Systems::AudioSystem(m_world);
+    m_audioSystem->initialize();
     
     // Setup game loop timer (60 FPS)
     connect(m_gameLoopTimer, &QTimer::timeout, this, &MainWindow::updateGameLoop);
@@ -66,6 +78,10 @@ MainWindow::~MainWindow()
 {
     if (m_gameWindow) {
         delete m_gameWindow;
+    }
+    if (m_audioSystem) {
+        m_audioSystem->shutdown();
+        delete m_audioSystem;
     }
     if (m_animationSystem) {
         delete m_animationSystem;
@@ -217,6 +233,12 @@ void MainWindow::createDockWidgets()
     
     setCentralWidget(m_centralTabs);
 
+    m_assetBrowser = new AssetBrowser(this);
+    m_assetBrowser->setRootPath(m_projectPath.isEmpty() ? QDir::currentPath() : m_projectPath);
+    QDockWidget* assetDock = new QDockWidget("Assets", this);
+    assetDock->setWidget(m_assetBrowser);
+    addDockWidget(Qt::BottomDockWidgetArea, assetDock);
+
     m_animatorGraphEditor = new AnimatorGraphEditor(nullptr);
     m_animatorGraphEditor->setWorld(m_world);
     m_animatorGraphEditor->setWindowTitle("Animator");
@@ -234,6 +256,9 @@ void MainWindow::connectViews()
         m_selectedEntity = entity;
     });
     connect(m_hierarchyView, &HierarchyView::entitySelected, m_animatorGraphEditor, &AnimatorGraphEditor::setSelectedEntity);
+
+    // Connect asset browser
+    connect(m_assetBrowser, &AssetBrowser::assetDoubleClicked, this, &MainWindow::onAssetDoubleClicked);
 
     // Connect play mode buttons
     connect(m_sceneView, &SceneView::playClicked, this, &MainWindow::onPlayClicked);
@@ -324,7 +349,8 @@ void MainWindow::openScene()
         if (result == QMessageBox::Save) saveScene();
     }
 
-    QString fileName = QFileDialog::getOpenFileName(this, "Open Scene", "", "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
+    QString defaultDir = m_projectPath.isEmpty() ? "" : m_projectPath + "/Scenes";
+    QString fileName = QFileDialog::getOpenFileName(this, "Open Scene", defaultDir, "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
     if (fileName.isEmpty()) return;
 
     if (SceneFile::loadScene(m_world, fileName)) {
@@ -362,7 +388,8 @@ void MainWindow::saveScene()
 
 void MainWindow::saveSceneAs()
 {
-    QString fileName = QFileDialog::getSaveFileName(this, "Save Scene As", "", "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
+    QString defaultDir = m_projectPath.isEmpty() ? "" : m_projectPath + "/Scenes";
+    QString fileName = QFileDialog::getSaveFileName(this, "Save Scene As", defaultDir, "DabozzEngine Scene (*.dabozz);;All Files (*.*)");
     if (fileName.isEmpty()) return;
 
     if (!fileName.endsWith(".dabozz")) {
@@ -652,6 +679,9 @@ void MainWindow::updateGameLoop()
         float deltaTime = 1.0f / 60.0f;
         
         // Update animations
+        if (m_audioSystem) {
+            m_audioSystem->update(deltaTime);
+        }
         if (m_animationSystem) {
             m_animationSystem->update(deltaTime);
         }
@@ -762,6 +792,94 @@ void MainWindow::onDuplicateSelected()
     if (m_selectedEntity == DabozzEngine::ECS::INVALID_ENTITY || !m_world) return;
     m_hierarchyView->duplicateSelectedEntity();
     m_sceneDirty = true;
+}
+
+void MainWindow::initProject()
+{
+    QDir projectDir(m_projectPath);
+
+    // Create standard folders if they don't exist
+    projectDir.mkpath("Scenes");
+    projectDir.mkpath("Assets");
+    projectDir.mkpath("Scripts");
+
+    // Set window title to project name
+    QString projectName = projectDir.dirName();
+    setWindowTitle(QString("Dabozz Editor - %1").arg(projectName));
+
+    // Load main scene if it exists
+    QString mainScene = m_projectPath + "/Scenes/main.dabozz";
+    if (QFile::exists(mainScene)) {
+        if (SceneFile::loadScene(m_world, mainScene)) {
+            m_currentScenePath = mainScene;
+            m_hierarchyView->refreshHierarchy();
+            m_sceneView->renderer()->update();
+            statusBar()->showMessage(QString("Loaded project: %1").arg(projectName));
+        }
+    } else {
+        // No main scene - create sample entities
+        createSampleEntities();
+        statusBar()->showMessage(QString("Opened project: %1 (new)").arg(projectName));
+    }
+}
+
+void MainWindow::onAssetDoubleClicked(const QString& filePath)
+{
+    QFileInfo info(filePath);
+    QString ext = info.suffix().toLower();
+
+    if (ext == "dabozz") {
+        // Load as scene
+        if (m_sceneDirty) {
+            auto result = QMessageBox::question(this, "Unsaved Changes",
+                "You have unsaved changes. Save first?",
+                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+            if (result == QMessageBox::Cancel) return;
+            if (result == QMessageBox::Save) saveScene();
+        }
+
+        if (SceneFile::loadScene(m_world, filePath)) {
+            m_currentScenePath = filePath;
+            m_sceneDirty = false;
+            m_undoStack->clear();
+            m_selectedEntity = DabozzEngine::ECS::INVALID_ENTITY;
+            m_hierarchyView->refreshHierarchy();
+            m_componentInspector->clearSelection();
+            m_sceneView->renderer()->update();
+            setWindowTitle(QString("Dabozz Editor - %1").arg(info.fileName()));
+            statusBar()->showMessage(QString("Opened scene: %1").arg(filePath));
+        }
+    } else if (ext == "obj" || ext == "fbx" || ext == "gltf" || ext == "glb" || ext == "dae") {
+        // Import as mesh - reuse existing importMesh logic but with a specific file
+        auto skeleton = std::make_shared<DabozzEngine::Renderer::Skeleton>();
+        skeleton->loadFromFile(filePath.toStdString());
+
+        auto meshes = DabozzEngine::Renderer::MeshLoader::LoadMesh(filePath.toStdString(), skeleton.get());
+        if (!meshes.empty()) {
+            DabozzEngine::ECS::EntityID entity = m_world->createEntity();
+            m_world->addComponent<DabozzEngine::ECS::Name>(entity, info.baseName());
+            m_world->addComponent<DabozzEngine::ECS::Transform>(entity);
+            m_world->addComponent<DabozzEngine::ECS::Hierarchy>(entity);
+
+            auto* meshComp = m_world->addComponent<DabozzEngine::ECS::Mesh>(entity);
+            *meshComp = meshes[0];
+
+            m_hierarchyView->refreshHierarchy();
+            m_sceneDirty = true;
+            statusBar()->showMessage(QString("Imported: %1").arg(info.fileName()));
+        }
+    } else if (ext == "cs") {
+        // Open in script editor
+        if (m_centralTabs) {
+            for (int i = 0; i < m_centralTabs->count(); ++i) {
+                if (m_centralTabs->tabText(i) == "Script Editor") {
+                    m_centralTabs->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        statusBar()->showMessage(QString("Opened script: %1").arg(info.fileName()));
+    }
 }
 
 void MainWindow::applyDarkTheme()

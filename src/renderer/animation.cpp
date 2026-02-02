@@ -310,7 +310,7 @@ void Animation::calculateBoneTransform(const AssimpNodeData* node, const glm::ma
     
     // Recurse to children
     for (int i = 0; i < node->childrenCount; i++) {
-        calculateBoneTransform(&node->children[i], globalTransformation, animationTime, outBoneMatrices);
+        (&node->children[i], globalTransformation, animationTime, outBoneMatrices);
     }
 }
 

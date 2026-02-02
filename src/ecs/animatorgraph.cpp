@@ -33,7 +33,6 @@ int AnimatorGraph::addTransition(int fromStateId, int toStateId)
 
 void AnimatorGraph::removeState(int id)
 {
-    // Remove all transitions involving this state
     transitions.erase(
         std::remove_if(transitions.begin(), transitions.end(),
             [id](const AnimTransition& t) {
@@ -42,14 +41,12 @@ void AnimatorGraph::removeState(int id)
         transitions.end()
     );
 
-    // Remove the state
     states.erase(
         std::remove_if(states.begin(), states.end(),
             [id](const AnimState& s) { return s.id == id; }),
         states.end()
     );
 
-    // Fix entry state if needed
     if (entryStateId == id) {
         entryStateId = states.empty() ? -1 : states[0].id;
     }
@@ -106,8 +103,6 @@ void AnimatorGraph::reset()
     transitionProgress = 0.0f;
     inTransition = false;
     previousClipTime = 0.0f;
-
-    // Reset all triggers
     for (auto& [name, param] : parameters) {
         if (param.type == AnimParamType::Trigger) {
             param.value = false;
