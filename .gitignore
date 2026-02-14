@@ -2,6 +2,8 @@
 build/
 release/
 assimp_build/
+bin/
+godot/
 
 # Qt generated files
 *.pro.user
