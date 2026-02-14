@@ -1,3 +1,15 @@
 [submodule "openal-soft"]
 	path = openal-soft
 	url = https://github.com/kcat/openal-soft.git
+[submodule "glm"]
+	path = glm
+	url = https://github.com/g-truc/glm.git
+[submodule "assimp_source"]
+	path = assimp_source
+	url = https://github.com/assimp/assimp.git
+[submodule "lua"]
+	path = lua
+	url = https://github.com/lua/lua.git
+[submodule "angelscript"]
+	path = angelscript
+	url = https://github.com/codecat/angelscript-mirror.git

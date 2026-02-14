@@ -1,8 +1,8 @@
 <RCC>
     <qresource prefix="/shaders">
-        <file alias="vertex.glsl">C:/Users/User/Documents/DabozzEngine/shaders/vertex.glsl</file>
-        <file alias="fragment.glsl">C:/Users/User/Documents/DabozzEngine/shaders/fragment.glsl</file>
-        <file alias="skybox_vertex.glsl">C:/Users/User/Documents/DabozzEngine/shaders/skybox_vertex.glsl</file>
-        <file alias="skybox_fragment.glsl">C:/Users/User/Documents/DabozzEngine/shaders/skybox_fragment.glsl</file>
+        <file alias="vertex.glsl">shaders/vertex.glsl</file>
+        <file alias="fragment.glsl">shaders/fragment.glsl</file>
+        <file alias="skybox_vertex.glsl">shaders/skybox_vertex.glsl</file>
+        <file alias="skybox_fragment.glsl">shaders/skybox_fragment.glsl</file>
     </qresource>
 </RCC>

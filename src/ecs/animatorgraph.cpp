@@ -12,7 +12,6 @@ int AnimatorGraph::addState(const QString& name, const QString& clipName, QPoint
     state.editorPosition = pos;
     states.push_back(state);
 
-    // First state becomes entry
     if (entryStateId == -1) {
         entryStateId = state.id;
         activeStateId = state.id;

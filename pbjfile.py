@@ -37,11 +37,12 @@ env.add_sources("src", extensions=[".cpp", ".c"])
 env.add_includes([
     "include",
     "assimp_source/include",
-    "assimp_build/include",
+    "assimp_source/build/include",
     "assimp_source/contrib/stb",
     "glm",
     "openal-soft/include",
-    "C:/Program Files/Mono/include/mono-2.0",
+    "lua",
+    "angelscript/sdk/angelscript/include",
     "C:/Qt/6.10.2/mingw_64/include",
     "C:/Qt/6.10.2/mingw_64/include/QtOpenGLWidgets",
     "C:/Qt/6.10.2/mingw_64/include/QtWidgets",
@@ -84,9 +85,10 @@ env.add_ldflags([
 
 env.add_lib_dirs([
     "C:/Qt/6.10.2/mingw_64/lib",
-    "C:/Program Files/Mono/lib",
-    "assimp_build/bin",
+    "assimp_source/build/lib",
     "openal-soft/build",
+    ".",
+    "angelscript/sdk/angelscript/lib",
 ])
 
 env.add_ldflags([
@@ -102,14 +104,15 @@ env.add_libs([
     "shell32",
     "opengl32",
     "glu32",
-    "assimp-5",
-    "mono-2.0-sgen",
+    "assimp",
+    "lua",
+    "angelscript",
     "OpenAL32",
 ])
 
 env.add_ldflags([
     "C:/Qt/6.10.2/mingw_64/lib/libQt6EntryPoint.a",
-    "assimp_build/bin/libassimp-5.dll",
+    "assimp_source/build/bin/libassimp-6.dll",
 ])
 
 ## Deploy ###################################################################
@@ -123,7 +126,7 @@ for dll in ["Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6OpenGL", "Qt6OpenGLWidgets", 
 for dll in ["libgcc_s_seh-1", "libstdc++-6", "libwinpthread-1"]:
     env.deploy(f"{MINGW_BIN}/{dll}.dll")
 
-env.deploy("assimp_build/bin/libassimp-5.dll")
+env.deploy("assimp_source/build/bin/libassimp-6.dll")
 env.deploy("openal-soft/build/OpenAL32.dll")
 
 env.deploy_dir(f"{QT_BIN}/../plugins/platforms", "platforms")

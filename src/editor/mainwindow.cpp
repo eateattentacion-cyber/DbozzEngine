@@ -7,6 +7,8 @@
 #include "editor/gamewindow.h"
 #include "editor/scripteditor.h"
 #include "editor/animatorgrapheditor.h"
+#include "scripting/scriptengine.h"
+#include "scripting/scriptapi.h"
 #include "ecs/components/transform.h"
 #include "ecs/components/name.h"
 #include "ecs/components/mesh.h"
@@ -40,6 +42,7 @@ MainWindow::MainWindow(const QString& projectPath, QWidget* parent)
     , m_physicsSystem(nullptr)
     , m_animationSystem(nullptr)
     , m_audioSystem(nullptr)
+    , m_scriptEngine(nullptr)
     , m_gameLoopTimer(new QTimer(this))
     , m_undoStack(new QUndoStack(this))
     , m_projectPath(projectPath)
@@ -85,6 +88,10 @@ MainWindow::~MainWindow()
     }
     if (m_animationSystem) {
         delete m_animationSystem;
+    }
+    if (m_scriptEngine) {
+        m_scriptEngine->shutdown();
+        delete m_scriptEngine;
     }
     if (m_physicsSystem) {
         delete m_physicsSystem;
@@ -578,10 +585,8 @@ void MainWindow::onPlayClicked()
         statusBar()->showMessage("Play Mode");
         m_sceneView->setModeLabel("Scene View - Play Mode");
 
-        // Save scene state before anything gets modified
         saveSceneState();
 
-        // Initialize physics on first play
         if (!m_butsuri) {
             DEBUG_LOG << "Initializing Butsuri Engine" << std::endl;
             m_butsuri = new DabozzEngine::Physics::ButsuriEngine();
@@ -591,14 +596,21 @@ void MainWindow::onPlayClicked()
             DEBUG_LOG << "Butsuri Engine initialized" << std::endl;
         }
         
-        // Freeze the editor view during play mode
+        if (!m_scriptEngine) {
+            DEBUG_LOG << "Initializing Script Engine" << std::endl;
+            m_scriptEngine = new DabozzEngine::Scripting::ScriptEngine();
+            m_scriptEngine->initialize(m_world);
+            loadProjectScripts();
+            m_scriptEngine->callLuaStart();
+            m_scriptEngine->callAngelScriptStart();
+            DEBUG_LOG << "Script Engine initialized" << std::endl;
+        }
+        
         m_sceneView->renderer()->setPlayMode(true);
 
-        // Disable gizmo and editor selection
         DEBUG_LOG << "Disabling gizmo" << std::endl;
         m_sceneView->renderer()->setSelectedEntity(DabozzEngine::ECS::INVALID_ENTITY);
         
-        // Mark all meshes as not uploaded so game window can upload them fresh
         DEBUG_LOG << "Resetting mesh upload status for new OpenGL context" << std::endl;
         for (DabozzEngine::ECS::EntityID entity : m_world->getEntities()) {
             DabozzEngine::ECS::Mesh* mesh = m_world->getComponent<DabozzEngine::ECS::Mesh>(entity);
@@ -611,7 +623,6 @@ void MainWindow::onPlayClicked()
             }
         }
         
-        // Create and show game window
         DEBUG_LOG << "Creating game window" << std::endl;
         if (!m_gameWindow) {
             m_gameWindow = new GameWindow(m_world);
@@ -623,7 +634,6 @@ void MainWindow::onPlayClicked()
         m_gameWindow->activateWindow();
         DEBUG_LOG << "Game window shown" << std::endl;
         
-        // Start game loop (60 FPS = ~16ms)
         DEBUG_LOG << "Starting game loop timer" << std::endl;
         m_gameLoopTimer->start(16);
         DEBUG_LOG << "Play mode setup complete" << std::endl;
@@ -678,7 +688,12 @@ void MainWindow::updateGameLoop()
     if (m_editorMode == EditorMode::Play) {
         float deltaTime = 1.0f / 60.0f;
         
-        // Update animations
+        if (m_scriptEngine) {
+            DabozzEngine::Scripting::ScriptAPI::SetDeltaTime(deltaTime);
+            m_scriptEngine->callLuaUpdate(deltaTime);
+            m_scriptEngine->callAngelScriptUpdate(deltaTime);
+        }
+        
         if (m_audioSystem) {
             m_audioSystem->update(deltaTime);
         }
@@ -686,12 +701,10 @@ void MainWindow::updateGameLoop()
             m_animationSystem->update(deltaTime);
         }
         
-        // Update physics
         if (m_physicsSystem) {
             m_physicsSystem->update(deltaTime);
         }
         
-        // Update renderer
         if (m_gameWindow) {
             m_gameWindow->renderer()->update();
         }
@@ -1199,4 +1212,40 @@ void MainWindow::applyDarkTheme()
     )";
 
     qApp->setStyleSheet(style);
+}
+
+void MainWindow::loadProjectScripts()
+{
+    if (m_projectPath.isEmpty() || !m_scriptEngine) return;
+    
+    QString scriptsPath = m_projectPath + "/Scripts";
+    QDir scriptsDir(scriptsPath);
+    
+    if (!scriptsDir.exists()) {
+        DEBUG_LOG << "Scripts folder not found: " << scriptsPath.toStdString() << std::endl;
+        return;
+    }
+    
+    QStringList filters;
+    filters << "*.lua" << "*.as";
+    QFileInfoList scriptFiles = scriptsDir.entryInfoList(filters, QDir::Files);
+    
+    DEBUG_LOG << "Loading " << scriptFiles.size() << " script(s) from " << scriptsPath.toStdString() << std::endl;
+    
+    for (const QFileInfo& fileInfo : scriptFiles) {
+        QString filePath = fileInfo.absoluteFilePath();
+        QString extension = fileInfo.suffix().toLower();
+        
+        if (extension == "lua") {
+            DEBUG_LOG << "Loading Lua script: " << filePath.toStdString() << std::endl;
+            if (!m_scriptEngine->loadLuaScript(filePath.toStdString())) {
+                DEBUG_LOG << "Failed to load Lua script: " << filePath.toStdString() << std::endl;
+            }
+        } else if (extension == "as") {
+            DEBUG_LOG << "Loading AngelScript: " << filePath.toStdString() << std::endl;
+            if (!m_scriptEngine->loadAngelScript(filePath.toStdString())) {
+                DEBUG_LOG << "Failed to load AngelScript: " << filePath.toStdString() << std::endl;
+            }
+        }
+    }
 }

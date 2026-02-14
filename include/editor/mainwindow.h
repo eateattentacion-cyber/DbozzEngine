@@ -21,6 +21,9 @@ namespace Systems {
 namespace Physics {
     class ButsuriEngine;
 }
+namespace Scripting {
+    class ScriptEngine;
+}
 }
 
 class GameWindow;
@@ -86,6 +89,7 @@ private:
     DabozzEngine::Systems::PhysicsSystem* m_physicsSystem;
     DabozzEngine::Systems::AnimationSystem* m_animationSystem;
     DabozzEngine::Systems::AudioSystem* m_audioSystem;
+    DabozzEngine::Scripting::ScriptEngine* m_scriptEngine;
     QTimer* m_gameLoopTimer;
     
     QMenu* m_fileMenu;
@@ -121,4 +125,5 @@ private:
     void initProject();
     void saveSceneState();
     void restoreSceneState();
+    void loadProjectScripts();
 };
