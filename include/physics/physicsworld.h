@@ -14,7 +14,6 @@ public:
     static PhysicsWorld* getInstance();
     
 private:
-    // TODO: Add your custom physics system members here
 };
 
 }
