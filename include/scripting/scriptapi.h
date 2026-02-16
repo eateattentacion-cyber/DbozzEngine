@@ -28,6 +28,9 @@ namespace Scripting {
 class ScriptAPI {
 public:
     static void SetDeltaTime(float dt) { s_deltaTime = dt; }
+    static void SetLogCallback(std::function<void(const std::string&)> callback) { s_logCallback = callback; }
+    
+    static std::function<void(const std::string&)> s_logCallback;
     
     static void RegisterLuaAPI(lua_State* L, ECS::World* world);
     static void RegisterAngelScriptAPI(asIScriptEngine* engine, ECS::World* world);
@@ -69,6 +72,17 @@ private:
     static int Lua_LookAt(lua_State* L);
     static int Lua_Distance(lua_State* L);
     static int Lua_Lerp(lua_State* L);
+    
+    // New physics API
+    static int Lua_Raycast(lua_State* L);
+    static int Lua_AddSphereRigidbody(lua_State* L);
+    
+    // New audio API
+    static int Lua_PlayAudio(lua_State* L);
+    static int Lua_StopAudio(lua_State* L);
+    static int Lua_PauseAudio(lua_State* L);
+    static int Lua_SetAudioVolume(lua_State* L);
+    static int Lua_SetAudioSpatial(lua_State* L);
 
     static void AS_Print(const std::string& msg);
     static DabozzEngine::ECS::EntityID AS_CreateEntity();

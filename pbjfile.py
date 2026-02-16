@@ -81,6 +81,7 @@ env.add_ldflags([
     "-Wl,-s",
     "-Wl,-subsystem,windows",
     "-mthreads",
+    "app.res",
 ])
 
 env.add_lib_dirs([

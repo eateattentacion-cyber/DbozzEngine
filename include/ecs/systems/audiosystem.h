@@ -22,6 +22,9 @@ public:
     void playSound(ECS::EntityID entity);
     void stopSound(ECS::EntityID entity);
     void pauseSound(ECS::EntityID entity);
+    
+    void setListenerPosition(const QVector3D& position);
+    void setListenerOrientation(const QVector3D& forward, const QVector3D& up);
 
     bool loadAudioFile(ECS::AudioSource* source);
 

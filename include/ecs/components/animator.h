@@ -75,7 +75,6 @@ struct Animator : public Component {
     void setAnimation(std::shared_ptr<Renderer::Animation> anim) {
         currentAnimation = anim;
         currentTime = 0.0f;
-        // Also add to map as "default" for backwards compatibility
         if (animations.empty()) {
             animations["default"] = anim;
             currentClipName = "default";

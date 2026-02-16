@@ -24,6 +24,7 @@ namespace Physics {
 namespace Scripting {
     class ScriptEngine;
 }
+
 }
 
 class GameWindow;
@@ -33,6 +34,8 @@ class HierarchyView;
 class AnimatorGraphEditor;
 class ScriptEditor;
 class AssetBrowser;
+class EsquemaEditor;
+class ConsoleWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -42,15 +45,20 @@ public:
     MainWindow(const QString& projectPath = QString(), QWidget* parent = nullptr);
     ~MainWindow();
 
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
 private slots:
     void newScene();
     void openScene();
     void saveScene();
     void saveSceneAs();
+    void openProjectManager();
     void exitApplication();
     void importMesh();
     void importAnimation();
     void openScriptEditor();
+    void openEsquemaEditor();
     void onPlayClicked();
     void onPauseClicked();
     void onStopClicked();
@@ -82,6 +90,8 @@ private:
     HierarchyView* m_hierarchyView;
     AnimatorGraphEditor* m_animatorGraphEditor;
     ScriptEditor* m_scriptEditor;
+    EsquemaEditor* m_esquemaEditor;
+    ConsoleWindow* m_consoleWindow;
     GameWindow* m_gameWindow;
     QTabWidget* m_centralTabs;
     DabozzEngine::ECS::World* m_world;

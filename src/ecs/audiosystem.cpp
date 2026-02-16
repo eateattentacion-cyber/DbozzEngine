@@ -95,6 +95,22 @@ void AudioSystem::update(float deltaTime)
         alSourcef(audio->sourceId, AL_GAIN, audio->volume);
         alSourcef(audio->sourceId, AL_PITCH, audio->pitch);
         alSourcei(audio->sourceId, AL_LOOPING, audio->loop ? AL_TRUE : AL_FALSE);
+        
+        // Update 3D spatial audio if enabled
+        if (audio->spatial) {
+            ECS::Transform* transform = m_world->getComponent<ECS::Transform>(entity);
+            if (transform) {
+                alSource3f(audio->sourceId, AL_POSITION, 
+                    transform->position.x(), 
+                    transform->position.y(), 
+                    transform->position.z());
+                alSourcei(audio->sourceId, AL_SOURCE_RELATIVE, AL_FALSE);
+            }
+        } else {
+            // Non-spatial audio plays at listener position
+            alSourcei(audio->sourceId, AL_SOURCE_RELATIVE, AL_TRUE);
+            alSource3f(audio->sourceId, AL_POSITION, 0.0f, 0.0f, 0.0f);
+        }
 
         if (audio->isPlaying) {
             ALint state;
@@ -250,3 +266,19 @@ ALenum AudioSystem::getALFormat(int channels, int bitsPerSample)
 
 } // namespace Systems
 } // namespace DabozzEngine
+
+void DabozzEngine::Systems::AudioSystem::setListenerPosition(const QVector3D& position)
+{
+    if (!m_initialized) return;
+    alListener3f(AL_POSITION, position.x(), position.y(), position.z());
+}
+
+void DabozzEngine::Systems::AudioSystem::setListenerOrientation(const QVector3D& forward, const QVector3D& up)
+{
+    if (!m_initialized) return;
+    float orientation[] = { 
+        forward.x(), forward.y(), forward.z(),
+        up.x(), up.y(), up.z()
+    };
+    alListenerfv(AL_ORIENTATION, orientation);
+}

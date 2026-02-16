@@ -12,6 +12,7 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #include "scripting/scriptapi.h"
+#include "input/inputmanager.h"
 #include "ecs/world.h"
 #include "ecs/components/transform.h"
 #include "ecs/components/rigidbody.h"
@@ -19,6 +20,8 @@
 #include "ecs/components/mesh.h"
 #include "ecs/components/boxcollider.h"
 #include "ecs/components/spherecollider.h"
+#include "ecs/components/audiosource.h"
+#include "physics/simplephysics.h"
 #include "debug/logger.h"
 #include <iostream>
 
@@ -27,6 +30,7 @@ namespace Scripting {
 
 ECS::World* ScriptAPI::s_world = nullptr;
 float ScriptAPI::s_deltaTime = 0.0f;
+std::function<void(const std::string&)> ScriptAPI::s_logCallback = nullptr;
 
 void ScriptAPI::RegisterLuaAPI(lua_State* L, ECS::World* world)
 {
@@ -56,6 +60,18 @@ void ScriptAPI::RegisterLuaAPI(lua_State* L, ECS::World* world)
     lua_register(L, "GetEntityName", Lua_GetEntityName);
     lua_register(L, "RaycastFromCamera", Lua_RaycastFromCamera);
     lua_register(L, "GetMousePosition", Lua_GetMousePosition);
+    
+    // New physics API
+    lua_register(L, "Raycast", Lua_Raycast);
+    lua_register(L, "AddSphereRigidbody", Lua_AddSphereRigidbody);
+    
+    // New audio API
+    lua_register(L, "PlayAudio", Lua_PlayAudio);
+    lua_register(L, "StopAudio", Lua_StopAudio);
+    lua_register(L, "PauseAudio", Lua_PauseAudio);
+    lua_register(L, "SetAudioVolume", Lua_SetAudioVolume);
+    lua_register(L, "SetAudioSpatial", Lua_SetAudioSpatial);
+
     lua_register(L, "IsKeyPressed", Lua_IsKeyPressed);
     lua_register(L, "IsKeyDown", Lua_IsKeyDown);
     lua_register(L, "IsMouseButtonPressed", Lua_IsMouseButtonPressed);
@@ -70,6 +86,15 @@ void ScriptAPI::RegisterLuaAPI(lua_State* L, ECS::World* world)
     lua_register(L, "Lerp", Lua_Lerp);
 
     DEBUG_LOG << "Lua API registered" << std::endl;
+}
+
+void AS_Print(const std::string& msg)
+{
+    DEBUG_LOG << "[AngelScript] " << msg << std::endl;
+    
+    if (ScriptAPI::s_logCallback) {
+        ScriptAPI::s_logCallback(msg);
+    }
 }
 
 void ScriptAPI::RegisterAngelScriptAPI(asIScriptEngine* engine, ECS::World* world)
@@ -173,6 +198,11 @@ int ScriptAPI::Lua_Print(lua_State* L)
         if (i < n) output += "\t";
     }
     DEBUG_LOG << "[Lua] " << output << std::endl;
+    
+    if (s_logCallback) {
+        s_logCallback(output);
+    }
+    
     return 0;
 }
 
@@ -703,29 +733,34 @@ int ScriptAPI::Lua_RaycastFromCamera(lua_State* L)
 
 int ScriptAPI::Lua_GetMousePosition(lua_State* L)
 {
-    lua_pushnumber(L, 0);
-    lua_pushnumber(L, 0);
+    QPoint pos = DabozzEngine::Input::InputManager::getInstance().getMousePosition();
+    lua_pushnumber(L, pos.x());
+    lua_pushnumber(L, pos.y());
     return 2;
 }
 
 int ScriptAPI::Lua_IsKeyPressed(lua_State* L)
 {
     int keyCode = static_cast<int>(luaL_checkinteger(L, 1));
-    lua_pushboolean(L, false);
+    bool pressed = DabozzEngine::Input::InputManager::getInstance().isKeyPressed(keyCode);
+    lua_pushboolean(L, pressed);
     return 1;
 }
 
 int ScriptAPI::Lua_IsKeyDown(lua_State* L)
 {
     int keyCode = static_cast<int>(luaL_checkinteger(L, 1));
-    lua_pushboolean(L, false);
+    bool down = DabozzEngine::Input::InputManager::getInstance().isKeyDown(keyCode);
+    lua_pushboolean(L, down);
     return 1;
 }
 
 int ScriptAPI::Lua_IsMouseButtonPressed(lua_State* L)
 {
     int button = static_cast<int>(luaL_checkinteger(L, 1));
-    lua_pushboolean(L, false);
+    Qt::MouseButton qtButton = static_cast<Qt::MouseButton>(button);
+    bool pressed = DabozzEngine::Input::InputManager::getInstance().isMouseButtonPressed(qtButton);
+    lua_pushboolean(L, pressed);
     return 1;
 }
 
@@ -880,7 +915,7 @@ void ScriptAPI::AS_SetEntityName(DabozzEngine::ECS::EntityID entity, const std::
 
 bool ScriptAPI::AS_IsKeyPressed(int keyCode)
 {
-    return false;
+    return DabozzEngine::Input::InputManager::getInstance().isKeyPressed(keyCode);
 }
 
 bool ScriptAPI::AS_HasComponent(DabozzEngine::ECS::EntityID entity, const std::string& componentName)
@@ -914,4 +949,138 @@ float ScriptAPI::AS_Lerp(float a, float b, float t)
 }
 
 }
+}
+
+
+// ===== New Physics API =====
+
+int ScriptAPI::Lua_Raycast(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    float ox = luaL_checknumber(L, 1);
+    float oy = luaL_checknumber(L, 2);
+    float oz = luaL_checknumber(L, 3);
+    float dx = luaL_checknumber(L, 4);
+    float dy = luaL_checknumber(L, 5);
+    float dz = luaL_checknumber(L, 6);
+    float maxDist = luaL_optnumber(L, 7, 1000.0f);
+    
+    Physics::ButsuriEngine* butsuri = Physics::ButsuriEngine::getInstance();
+    if (!butsuri) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    
+    QVector3D origin(ox, oy, oz);
+    QVector3D direction(dx, dy, dz);
+    
+    auto hit = butsuri->raycast(origin, direction, maxDist);
+    
+    if (hit.hit) {
+        lua_pushboolean(L, true);
+        lua_pushnumber(L, hit.point.x());
+        lua_pushnumber(L, hit.point.y());
+        lua_pushnumber(L, hit.point.z());
+        lua_pushnumber(L, hit.distance);
+        lua_pushinteger(L, hit.bodyId);
+        return 6;
+    } else {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+}
+
+int ScriptAPI::Lua_AddSphereRigidbody(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    float radius = luaL_checknumber(L, 2);
+    float mass = luaL_checknumber(L, 3);
+    bool isStatic = lua_toboolean(L, 4);
+    
+    auto* rb = s_world->addComponent<ECS::RigidBody>(entity, mass, isStatic, false);
+    if (rb) {
+        auto* sphereCol = s_world->addComponent<ECS::SphereCollider>(entity);
+        if (sphereCol) {
+            sphereCol->radius = radius;
+        }
+    }
+    
+    return 0;
+}
+
+// ===== New Audio API =====
+
+int ScriptAPI::Lua_PlayAudio(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    
+    auto* audio = s_world->getComponent<ECS::AudioSource>(entity);
+    if (audio) {
+        audio->playOnStart = true;
+    }
+    
+    return 0;
+}
+
+int ScriptAPI::Lua_StopAudio(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    
+    auto* audio = s_world->getComponent<ECS::AudioSource>(entity);
+    if (audio) {
+        audio->isPlaying = false;
+    }
+    
+    return 0;
+}
+
+int ScriptAPI::Lua_PauseAudio(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    
+    auto* audio = s_world->getComponent<ECS::AudioSource>(entity);
+    if (audio) {
+        audio->isPlaying = false;
+    }
+    
+    return 0;
+}
+
+int ScriptAPI::Lua_SetAudioVolume(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    float volume = luaL_checknumber(L, 2);
+    
+    auto* audio = s_world->getComponent<ECS::AudioSource>(entity);
+    if (audio) {
+        audio->volume = volume;
+    }
+    
+    return 0;
+}
+
+int ScriptAPI::Lua_SetAudioSpatial(lua_State* L)
+{
+    if (!s_world) return 0;
+    
+    ECS::EntityID entity = luaL_checkinteger(L, 1);
+    bool spatial = lua_toboolean(L, 2);
+    
+    auto* audio = s_world->getComponent<ECS::AudioSource>(entity);
+    if (audio) {
+        audio->spatial = spatial;
+    }
+    
+    return 0;
 }

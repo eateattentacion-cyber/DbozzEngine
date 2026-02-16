@@ -7,6 +7,7 @@
 #include "editor/gamewindow.h"
 #include "editor/scripteditor.h"
 #include "editor/animatorgrapheditor.h"
+#include "editor/projectmanager.h"
 #include "scripting/scriptengine.h"
 #include "scripting/scriptapi.h"
 #include "ecs/components/transform.h"
@@ -695,6 +696,22 @@ void MainWindow::updateGameLoop()
         }
         
         if (m_audioSystem) {
+            // Update listener position to match camera
+            // Find camera entity (you can tag it or use a specific name)
+            for (auto entity : m_world->getEntities()) {
+                auto* name = m_world->getComponent<DabozzEngine::ECS::Name>(entity);
+                if (name && name->name == "Camera") {
+                    auto* transform = m_world->getComponent<DabozzEngine::ECS::Transform>(entity);
+                    if (transform) {
+                        m_audioSystem->setListenerPosition(transform->position);
+                        // Calculate forward direction from rotation
+                        QVector3D forward = transform->rotation.rotatedVector(QVector3D(0, 0, -1));
+                        QVector3D up = transform->rotation.rotatedVector(QVector3D(0, 1, 0));
+                        m_audioSystem->setListenerOrientation(forward, up);
+                    }
+                    break;
+                }
+            }
             m_audioSystem->update(deltaTime);
         }
         if (m_animationSystem) {
@@ -1247,5 +1264,56 @@ void MainWindow::loadProjectScripts()
                 DEBUG_LOG << "Failed to load AngelScript: " << filePath.toStdString() << std::endl;
             }
         }
+    }
+}
+
+
+void MainWindow::openProjectManager()
+{
+    // Close the main window first to avoid multiple windows
+    close();
+    
+    ProjectManager* projectManager = new ProjectManager();
+    projectManager->setAttribute(Qt::WA_DeleteOnClose);
+    projectManager->show();
+    projectManager->raise();
+    projectManager->activateWindow();
+}
+
+void MainWindow::openEsquemaEditor()
+{
+    // Esquema disabled for now
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    // If we're in play mode, stop the game first
+    if (m_editorMode == EditorMode::Play || m_editorMode == EditorMode::Paused) {
+        onStopClicked();
+    }
+    
+    // Save any unsaved changes if needed
+    if (m_sceneDirty) {
+        QMessageBox::StandardButton reply = QMessageBox::question(
+            this, 
+            "Unsaved Changes", 
+            "You have unsaved changes. Do you want to save before closing?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel
+        );
+        
+        if (reply == QMessageBox::Save) {
+            saveScene();
+        } else if (reply == QMessageBox::Cancel) {
+            event->ignore();
+            return;
+        }
+    }
+    
+    // Accept the close event
+    event->accept();
+    
+    // If this is the last window and no project is open, don't try to reopen anything
+    if (m_projectPath.isEmpty()) {
+        QApplication::quit();
     }
 }

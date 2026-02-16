@@ -24,6 +24,9 @@
 ProjectManager::ProjectManager(QWidget* parent)
     : QMainWindow(parent)
 {
+    // Quit the application when this window closes if it's the only window
+    setAttribute(Qt::WA_QuitOnClose, true);
+    
     setWindowTitle("DabozzEngine - Project Manager");
     resize(900, 600);
 
@@ -228,7 +231,12 @@ void ProjectManager::onNewProject()
     refreshProjectList();
 
     MainWindow* editor = new MainWindow(projectPath);
+    editor->setAttribute(Qt::WA_QuitOnClose, true);
+    editor->setAttribute(Qt::WA_DeleteOnClose);
     editor->showMaximized();
+    
+    // Disable quit on close before closing this window
+    setAttribute(Qt::WA_QuitOnClose, false);
     close();
 }
 
@@ -277,7 +285,12 @@ void ProjectManager::onProjectDoubleClicked(QListWidgetItem* item)
     saveProjects();
 
     MainWindow* editor = new MainWindow(projectPath);
+    editor->setAttribute(Qt::WA_QuitOnClose, true);
+    editor->setAttribute(Qt::WA_DeleteOnClose);
     editor->showMaximized();
+    
+    // Disable quit on close before closing this window
+    setAttribute(Qt::WA_QuitOnClose, false);
     close();
 }
 

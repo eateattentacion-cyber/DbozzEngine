@@ -97,10 +97,8 @@ cd angelscript/sdk/angelscript/projects/mingw
 mingw32-make
 cd ../../../../..
 
-# Build Engine
 python pbj.py build --target release
 
-# Run Editor
 ./bin/DabozzEditor.exe
 ```
 
