@@ -48,7 +48,6 @@ void Start()
 
 void Update(float deltaTime)
 {
-    // Your game logic here
 }
 ```
 
@@ -76,23 +75,19 @@ void Update(float deltaTime)
 git clone --recursive https://github.com/eateattentacion-cyber/DbozzEngine.git
 cd DbozzEngine
 
-# Build Assimp
 cd assimp_source
 mkdir build && cd build
 cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DASSIMP_WARNINGS_AS_ERRORS=OFF
 mingw32-make -j8
 cd ../..
 
-# Build OpenAL
 mkdir openal-soft/build && cd openal-soft/build
 cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 mingw32-make -j8
 cd ../..
 
-# Build Lua
 build_lua.bat
 
-# Build AngelScript
 cd angelscript/sdk/angelscript/projects/mingw
 mingw32-make
 cd ../../../../..
