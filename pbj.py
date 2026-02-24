@@ -34,6 +34,7 @@
 PB&J Build System - A  build system for DabozzEngine.
 
 Usage:
+    python pbj.py setup [--verbose]
     python pbj.py build [--target debug|release] [-j N] [--verbose]
     python pbj.py clean
     python pbj.py rebuild [--target debug|release] [-j N] [--verbose]
@@ -698,12 +699,220 @@ def _load_pbjfile():
     return env
 
 
+class DependencyBuilder:
+    """
+    @brief Builds external dependencies (assimp, lua, angelscript, openal).
+    """
+
+    def __init__(self, verbose=False):
+        self._verbose = verbose
+
+    def _run_cmd(self, cmd, cwd=None, desc=""):
+        """@brief Run a command and handle output."""
+        if desc:
+            print(f"  {desc}")
+        if self._verbose:
+            print(f"    $ {' '.join(cmd) if isinstance(cmd, list) else cmd}")
+        
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=not self._verbose,
+            text=True,
+            shell=isinstance(cmd, str)
+        )
+        
+        if result.returncode != 0:
+            if not self._verbose and result.stderr:
+                print(result.stderr)
+            return False
+        return True
+
+    def build_lua(self):
+        """@brief Build Lua static library."""
+        print("\n=== Building Lua ===")
+        
+        if os.path.exists("liblua.a"):
+            print("  liblua.a already exists, skipping...")
+            return True
+
+        lua_dir = "lua"
+        if not os.path.isdir(lua_dir):
+            print(f"  Error: {lua_dir}/ directory not found")
+            return False
+
+        print("  Compiling Lua sources...")
+        lua_files = []
+        for f in os.listdir(lua_dir):
+            if f.endswith(".c") and f not in ["lua.c", "luac.c", "onelua.c"]:
+                lua_files.append(f)
+
+        obj_files = []
+        for src in lua_files:
+            obj = src.replace(".c", ".o")
+            obj_files.append(obj)
+            cmd = ["gcc", "-O2", "-c", src]
+            if not self._run_cmd(cmd, cwd=lua_dir, desc=f"Compiling {src}"):
+                print(f"  Failed to compile {src}")
+                return False
+
+        print("  Creating liblua.a...")
+        cmd = ["ar", "rcs", "liblua.a"] + obj_files
+        if not self._run_cmd(cmd, cwd=lua_dir):
+            print("  Failed to create liblua.a")
+            return False
+
+        shutil.move(os.path.join(lua_dir, "liblua.a"), "liblua.a")
+        
+        for obj in obj_files:
+            obj_path = os.path.join(lua_dir, obj)
+            if os.path.exists(obj_path):
+                os.remove(obj_path)
+
+        print("  Lua build complete!")
+        return True
+
+    def build_assimp(self):
+        """@brief Build Assimp using CMake."""
+        print("\n=== Building Assimp ===")
+        
+        dll_path = "assimp_source/build/bin/libassimp-6.dll"
+        if os.path.exists(dll_path):
+            print("  Assimp already built, skipping...")
+            return True
+
+        assimp_src = "assimp_source"
+        if not os.path.isdir(assimp_src):
+            print(f"  Error: {assimp_src}/ directory not found")
+            return False
+
+        build_dir = os.path.join(assimp_src, "build")
+        os.makedirs(build_dir, exist_ok=True)
+
+        print("  Running CMake configure...")
+        cmake_cmd = [
+            "cmake",
+            "-G", "MinGW Makefiles",
+            "..",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DASSIMP_BUILD_TESTS=OFF",
+            "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF",
+            "-DASSIMP_BUILD_SAMPLES=OFF",
+            "-DASSIMP_INSTALL=OFF",
+            "-DBUILD_SHARED_LIBS=ON"
+        ]
+        
+        if not self._run_cmd(cmake_cmd, cwd=build_dir):
+            print("  CMake configuration failed!")
+            return False
+
+        print("  Building Assimp (this may take a while)...")
+        make_cmd = ["mingw32-make", "-j", str(cpu_count())]
+        if not self._run_cmd(make_cmd, cwd=build_dir):
+            print("  Assimp build failed!")
+            return False
+
+        print("  Assimp build complete!")
+        return True
+
+    def build_angelscript(self):
+        """@brief Build AngelScript library."""
+        print("\n=== Building AngelScript ===")
+        
+        lib_path = "angelscript/sdk/angelscript/lib/libangelscript.a"
+        if os.path.exists(lib_path):
+            print("  AngelScript already built, skipping...")
+            return True
+
+        as_dir = "angelscript/sdk/angelscript/projects/mingw"
+        if not os.path.isdir(as_dir):
+            print(f"  Error: {as_dir}/ directory not found")
+            return False
+
+        print("  Building AngelScript...")
+        make_cmd = ["mingw32-make", "-j", str(cpu_count())]
+        if not self._run_cmd(make_cmd, cwd=as_dir):
+            print("  AngelScript build failed!")
+            return False
+
+        print("  AngelScript build complete!")
+        return True
+
+    def build_openal(self):
+        """@brief Build OpenAL using CMake."""
+        print("\n=== Building OpenAL ===")
+        
+        dll_path = "openal-soft/build/OpenAL32.dll"
+        if os.path.exists(dll_path):
+            print("  OpenAL already built, skipping...")
+            return True
+
+        openal_src = "openal-soft"
+        if not os.path.isdir(openal_src):
+            print(f"  Error: {openal_src}/ directory not found")
+            return False
+
+        build_dir = os.path.join(openal_src, "build")
+        os.makedirs(build_dir, exist_ok=True)
+
+        print("  Running CMake configure...")
+        cmake_cmd = [
+            "cmake",
+            "-G", "MinGW Makefiles",
+            "..",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DALSOFT_EXAMPLES=OFF",
+            "-DALSOFT_TESTS=OFF",
+            "-DALSOFT_UTILS=OFF"
+        ]
+        
+        if not self._run_cmd(cmake_cmd, cwd=build_dir):
+            print("  CMake configuration failed!")
+            return False
+
+        print("  Building OpenAL...")
+        make_cmd = ["mingw32-make", "-j", str(cpu_count())]
+        if not self._run_cmd(make_cmd, cwd=build_dir):
+            print("  OpenAL build failed!")
+            return False
+
+        print("  OpenAL build complete!")
+        return True
+
+    def setup_all(self):
+        """@brief Build all dependencies."""
+        print("=== PB&J Dependency Setup ===\n")
+        
+        deps = [
+            ("Lua", self.build_lua),
+            ("Assimp", self.build_assimp),
+            ("AngelScript", self.build_angelscript),
+            ("OpenAL", self.build_openal),
+        ]
+
+        failed = []
+        for name, build_func in deps:
+            if not build_func():
+                failed.append(name)
+
+        print("\n" + "="*50)
+        if failed:
+            print(f"Setup FAILED. The following dependencies failed to build:")
+            for name in failed:
+                print(f"  - {name}")
+            return False
+        else:
+            print("All dependencies built successfully!")
+            print("You can now run: python pbj.py build")
+            return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="pbj",
         description="PB&J Build System for DabozzEngine"
     )
-    parser.add_argument("command", choices=["build", "clean", "rebuild"],
+    parser.add_argument("command", choices=["setup", "build", "clean", "rebuild"],
                         help="Build command to execute")
     parser.add_argument("--target", choices=["debug", "release"], default="release",
                         help="Build target (default: release)")
@@ -713,6 +922,13 @@ def main():
                         help="Verbose output")
 
     args = parser.parse_args()
+
+    if args.command == "setup":
+        dep_builder = DependencyBuilder(verbose=args.verbose)
+        if not dep_builder.setup_all():
+            sys.exit(1)
+        return
+
     env = _load_pbjfile()
     builder = Builder(env, target=args.target, jobs=args.jobs, verbose=args.verbose)
 
@@ -729,5 +945,3 @@ def main():
 
 if __name__ == "__main__":
   main()
-
-  
